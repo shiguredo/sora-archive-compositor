@@ -1,0 +1,252 @@
+use std::backtrace::{Backtrace, BacktraceStatus};
+use std::panic::Location;
+
+/// エラー型
+///
+/// 任意のエラー型から変換可能にするために意図的に [`std::error::Error`] を実装していない
+pub struct Error {
+    /// エラーが発生した理由
+    pub reason: String,
+
+    /// エラーが作成されたソースコードの場所
+    pub location: &'static Location<'static>,
+
+    /// エラー発生箇所を示すバックトレース
+    ///
+    /// バックトレースは `RUST_BACKTRACE` 環境変数が設定されていない場合には取得されない
+    pub backtrace: Backtrace,
+}
+
+impl Error {
+    /// [`Error`] インスタンスを生成する
+    #[track_caller]
+    pub fn new<T: Into<String>>(reason: T) -> Self {
+        Self {
+            reason: reason.into(),
+            location: Location::caller(),
+            backtrace: Backtrace::capture(),
+        }
+    }
+
+    /// 既存の [`Error`] に文脈情報を追加する
+    pub fn with_context(mut self, context: impl AsRef<str>) -> Self {
+        self.reason = format!("{}: {}", context.as_ref(), self.reason);
+        self
+    }
+
+    /// エラー理由のみの文字列表現を返す
+    ///
+    /// `Display` を実装していないため、互換用途で明示的に提供する。
+    pub fn display(&self) -> String {
+        self.reason.clone()
+    }
+
+    fn fmt_detailed(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.reason)?;
+        write!(f, " (at {}:{})", self.location.file(), self.location.line())?;
+
+        if self.backtrace.status() == BacktraceStatus::Disabled {
+            write!(f, " [RUST_BACKTRACE=1 for backtrace]")?;
+        }
+        if self.backtrace.status() == BacktraceStatus::Captured {
+            write!(f, "\n\nBacktrace:\n{}", self.backtrace)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl std::fmt::Debug for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.fmt_detailed(f)
+    }
+}
+
+impl From<Error> for noargs::Error {
+    fn from(error: Error) -> Self {
+        // 0.4.3 で `noargs::Error::Other::error` は `Box<dyn Display>` から `String` に変わった
+        noargs::Error::Other {
+            metadata: None,
+            error: format!("{error:?}"),
+        }
+    }
+}
+
+// [NOTE]
+// `impl<E: std::error::Error> From<E> for Error` や
+// `impl<E: std::fmt::Display> From<E> for Error` は実装しない方針にしている。
+// `Error` を `Error` のまま再ラップした場合に reason / location / backtrace が重複して、
+// エラー出力が冗長になるのを防ぐため。
+// 既存の `Error` に文脈を追加したい場合は `Error::with_context()` を使うこと。
+//
+// そのため、新しいエラー型を導入して `?` で `crate::Error` へ変換したい場合は、
+// このファイルに個別の `impl From<NewError> for Error` を追加する。
+impl From<std::io::Error> for Error {
+    #[track_caller]
+    fn from(e: std::io::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<std::num::ParseIntError> for Error {
+    #[track_caller]
+    fn from(e: std::num::ParseIntError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<std::num::TryFromIntError> for Error {
+    #[track_caller]
+    fn from(e: std::num::TryFromIntError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<std::string::FromUtf8Error> for Error {
+    #[track_caller]
+    fn from(e: std::string::FromUtf8Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<std::time::SystemTimeError> for Error {
+    #[track_caller]
+    fn from(e: std::time::SystemTimeError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<nojson::JsonParseError> for Error {
+    #[track_caller]
+    fn from(e: nojson::JsonParseError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_mp4::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_mp4::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_mp4::aux::SampleTableAccessorError> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_mp4::aux::SampleTableAccessorError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_dav1d::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_dav1d::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_libyuv::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_libyuv::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_openh264::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_openh264::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_opus::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_opus::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_svt_av1::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_svt_av1::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_libvpx::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_libvpx::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+#[cfg(feature = "fdk-aac")]
+impl From<shiguredo_fdk_aac::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_fdk_aac::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+#[cfg(feature = "nvcodec")]
+impl From<shiguredo_nvcodec::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_nvcodec::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl From<shiguredo_audio_toolbox::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_audio_toolbox::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl From<shiguredo_video_toolbox::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_video_toolbox::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn with_context_adds_prefix() {
+        // reason に prefix が付与されることを確認する
+        let err = Error::new("内側の理由").with_context("外側の文脈");
+        assert_eq!(err.reason, "外側の文脈: 内側の理由");
+    }
+
+    #[test]
+    fn with_context_preserves_location_and_backtrace_status() {
+        // with_context が location と backtrace の状態を維持することを確認する
+        let err = Error::new("内側");
+        let location = err.location;
+        let backtrace_status = err.backtrace.status();
+
+        let err = err.with_context("外側");
+
+        assert_eq!(err.location.file(), location.file());
+        assert_eq!(err.location.line(), location.line());
+        assert_eq!(err.backtrace.status(), backtrace_status);
+    }
+
+    #[test]
+    fn from_error_to_noargs_error_uses_other_variant() {
+        // noargs::Error への変換が Other バリアントを使うことを確認する
+        let err = Error::new("理由");
+        let noargs_err = noargs::Error::from(err);
+
+        match noargs_err {
+            noargs::Error::Other { metadata, .. } => {
+                assert!(metadata.is_none(), "metadata が None であることを期待");
+            }
+            _ => panic!("noargs::Error::Other が返ることを期待"),
+        }
+    }
+}

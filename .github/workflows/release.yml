@@ -1,0 +1,186 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  RUST_BACKTRACE: 1
+  # Ubuntu 24.04 / 26.04 で共通に使える版。26.04 は NVIDIA 公式が 13.3.x のみ
+  CUDA_VERSION: "13.3.1"
+
+jobs:
+  # Release 作成だけなので軽量イメージで足りる (sora-rust-sdk / raw-player-rs と同じ)
+  github-release:
+    name: "Create GitHub Release"
+    runs-on: ubuntu-slim
+    outputs:
+      version: ${{ steps.get_version.outputs.VERSION }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Get the version
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ${{ contains(steps.get_version.outputs.VERSION, 'canary') }}; then
+            gh release create ${{ steps.get_version.outputs.VERSION }} \
+              --prerelease \
+              --title "${{ steps.get_version.outputs.VERSION }}" \
+              --notes "Release ${{ steps.get_version.outputs.VERSION }}"
+          else
+            gh release create ${{ steps.get_version.outputs.VERSION }} \
+              --title "${{ steps.get_version.outputs.VERSION }}" \
+              --notes "Release ${{ steps.get_version.outputs.VERSION }}"
+          fi
+
+  # Ubuntu 向けリリースバイナリ。
+  # feature 構成:
+  #   x86_64: --features nvcodec,fdk-aac
+  #   arm64:  --features fdk-aac
+  # Ubuntu バージョンごとにネイティブビルドする (24.04 と 26.04 を兼用しない)。
+  # ubuntu-slim は codec ビルド用 apt 依存を満たせないため使わない。
+  # Docker イメージ用ジョブは Dockerfile 移植完了後に追加する。
+  ubuntu-binary:
+    name: "Upload Binary (${{ matrix.platform.name }})"
+    needs: github-release
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: ubuntu-24.04_x86_64
+            runs-on: ubuntu-24.04
+            features: nvcodec,fdk-aac
+            cuda: true
+          - name: ubuntu-24.04_arm64
+            runs-on: ubuntu-24.04-arm
+            features: fdk-aac
+            cuda: false
+          - name: ubuntu-26.04_x86_64
+            runs-on: ubuntu-26.04
+            features: nvcodec,fdk-aac
+            cuda: true
+          - name: ubuntu-26.04_arm64
+            runs-on: ubuntu-26.04-arm
+            features: fdk-aac
+            cuda: false
+    runs-on: ${{ matrix.platform.runs-on }}
+    # codec crate をソースからビルドするため余裕を持たせる (ci.yml と同じ)
+    timeout-minutes: 40
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install packages to build external dependencies
+        run: |
+          sudo apt-get update
+          # 一覧は docs/build.md / ci.yml の Ubuntu 向け手順と揃える。
+          # fdk-aac feature 用に libfdk-aac-dev (ヘッダ) を追加する。
+          # 共有ライブラリは実行時ロードなのでバイナリには同梱しない。
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config cmake clang libfdk-aac-dev
+
+      - name: Setup CUDA Toolkit
+        if: matrix.platform.cuda
+        uses: shiguredo/github-actions/.github/actions/setup-cuda-toolkit@main
+        with:
+          cuda_version: ${{ env.CUDA_VERSION }}
+          platform: ${{ matrix.platform.runs-on }}
+
+      - run: rustup update stable
+      - uses: shiguredo/github-actions/.github/actions/rust-cache@main
+        with:
+          os: ${{ matrix.platform.runs-on }}
+          toolchain: stable
+
+      - name: Build release binary
+        run: cargo build --release --locked --features ${{ matrix.platform.features }}
+
+      - name: Package and upload release asset
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.github-release.outputs.version }}
+          PLATFORM: ${{ matrix.platform.name }}
+        run: |
+          DIR="sora-archive-compositor-${VERSION}_${PLATFORM}"
+          ARCHIVE="${DIR}.tar.gz"
+          mkdir -p "${DIR}"
+          cp target/release/sora-archive-compositor "${DIR}/"
+          tar -czf "${ARCHIVE}" "${DIR}"
+          gh release upload "${VERSION}" "${ARCHIVE}" --clobber
+
+  # macOS はデフォルト構成 (Apple Audio Toolbox / Video Toolbox)。
+  # 直近 2 バージョン方針に合わせ macos-26 / macos-15 のみ。
+  macos-binary:
+    name: "Upload Binary (${{ matrix.platform.name }})"
+    needs: github-release
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: macos-26_arm64
+            runs-on: macos-26
+          - name: macos-15_arm64
+            runs-on: macos-15
+    runs-on: ${{ matrix.platform.runs-on }}
+    timeout-minutes: 40
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - run: rustup update stable
+      - uses: shiguredo/github-actions/.github/actions/rust-cache@main
+        with:
+          os: ${{ matrix.platform.runs-on }}
+          toolchain: stable
+
+      - name: Install packages to build external dependencies
+        run: |
+          brew update
+          # 一覧は docs/build.md / ci.yml の macOS 向け手順と揃える
+          brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Package and upload release asset
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.github-release.outputs.version }}
+          PLATFORM: ${{ matrix.platform.name }}
+        run: |
+          DIR="sora-archive-compositor-${VERSION}_${PLATFORM}"
+          ARCHIVE="${DIR}.tar.gz"
+          mkdir -p "${DIR}"
+          cp target/release/sora-archive-compositor "${DIR}/"
+          tar -czf "${ARCHIVE}" "${DIR}"
+          gh release upload "${VERSION}" "${ARCHIVE}" --clobber
+
+  slack_notify:
+    needs: [github-release, ubuntu-binary, macos-binary]
+    permissions:
+      actions: read
+      contents: read
+    timeout-minutes: 20
+    runs-on: ubuntu-slim
+    if: always()
+    steps:
+      - name: Slack Notification
+        uses: shiguredo/github-actions/.github/actions/slack-notify@main
+        with:
+          status: ${{ job.status }}
+          slack_webhook: ${{ secrets.SLACK_WEBHOOK }}
+          # チャネル名に # は付けない (ci.yml と同じ)
+          slack_channel: sora-tools
+          notify_mode: failure_and_fixed
+        env:
+          GH_TOKEN: ${{ github.token }}

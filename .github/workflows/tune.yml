@@ -1,0 +1,266 @@
+name: Tune
+
+on:
+  workflow_dispatch:
+    inputs:
+      codec:
+        description: "対象コーデック (レイアウトファイルとランナーを自動判別します)"
+        type: choice
+        options:
+          - vp9
+          - h264
+          - av1
+          - nvcodec-h264
+          - nvcodec-h265
+          - nvcodec-av1
+          - video-toolbox-h264
+          - video-toolbox-h265
+        default: vp9
+      trial-count:
+        description: "tune の目標試行回数 (--trial-count)。動作確認は小さな値にする"
+        type: string
+        default: "50"
+      trial-timeout:
+        description: "各トライアルのタイムアウト秒数 (--trial-timeout)。超過したトライアルは失敗扱い"
+        type: string
+        default: "120"
+
+env:
+  RUST_BACKTRACE: 1
+  # tune の実行条件 (比較条件を揃えるため固定。変更したい場合はこのファイルを直接編集する)
+  FRAME_COUNT: "300"
+  RESOLUTION: "1280x720"
+  FRAME_RATE: "30"
+  DURATION: "10"
+  SEED: "0"
+
+jobs:
+  tune-cpu:
+    name: Tune CPU (${{ inputs.codec }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    if: contains(fromJSON('["vp9", "h264", "av1"]'), inputs.codec)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: rustup update stable
+      - name: Install packages to build external dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config cmake clang
+      - uses: shiguredo/github-actions/.github/actions/rust-cache@main
+        with:
+          os: ubuntu-24.04
+          toolchain: stable
+      - run: cargo build --release
+      - name: Environment info
+        run: |
+          {
+            echo "cpu: $(lscpu | awk -F': +' '/^Model name/ {print $2; exit}')"
+            echo "os: $RUNNER_OS $RUNNER_ARCH"
+            echo "rustc: $(rustc --version)"
+            echo
+            free -h
+          } > env.txt
+          cat env.txt
+      - name: Cache dummy archives
+        id: cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            archive-participant-*.json
+            archive-participant-*.mp4
+          key: tune-dummy-${{ env.RESOLUTION }}-${{ env.FRAME_RATE }}-${{ env.DURATION }}-${{ env.SEED }}
+      - name: Generate dummy archives
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          SEED: ${{ env.SEED }}
+        run: |
+          # ソース数は 3 固定。participant ごとに seed + i を割り当てる
+          for i in 0 1 2; do
+            seed=$((SEED + i))
+            ./target/release/sora-archive-compositor generate-archive . \
+              --connection-id "participant-${i}" \
+              --resolution ${{ env.RESOLUTION }} \
+              --frame-rate ${{ env.FRAME_RATE }} \
+              --duration ${{ env.DURATION }} \
+              --seed "${seed}"
+          done
+          ls -la
+      - name: Run tune
+        run: |
+          case "${{ inputs.codec }}" in
+            vp9) layout="layout-examples/tune-libvpx-vp9.jsonc" ;;
+            h264) layout="layout-examples/tune-openh264.jsonc" ;;
+            av1) layout="layout-examples/tune-svt-av1.jsonc" ;;
+          esac
+          ./target/release/sora-archive-compositor tune \
+            -l "${layout}" \
+            --trial-count ${{ inputs.trial-count }} \
+            --trial-timeout ${{ inputs.trial-timeout }} \
+            --frame-count ${{ env.FRAME_COUNT }} \
+            . 2>&1 | tee tune.txt
+      - name: Upload results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tune-${{ inputs.codec }}-cpu
+          path: |
+            env.txt
+            tune.txt
+            tune/
+
+  tune-nvcodec:
+    name: Tune NVENC (${{ inputs.codec }})
+    runs-on:
+      group: Self
+      labels: [self-hosted, linux, x64, NVIDIA-Video-Codec-SDK]
+    timeout-minutes: 90
+    if: contains(fromJSON('["nvcodec-h264", "nvcodec-h265", "nvcodec-av1"]'), inputs.codec)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+      - name: Update PATH
+        run: echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+      - name: Install packages to build external dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config cmake clang
+      - name: Setup CUDA PATH
+        run: |
+          echo "CUDA_PATH=/usr/local/cuda" >> $GITHUB_ENV
+          echo "/usr/local/cuda/bin" >> $GITHUB_PATH
+      - run: cargo build --release --features nvcodec
+      - name: Environment info
+        run: |
+          {
+            echo "cpu: $(lscpu | awk -F': +' '/^Model name/ {print $2; exit}')"
+            echo "os: $RUNNER_OS $RUNNER_ARCH"
+            echo "rustc: $(rustc --version)"
+            echo
+            free -h
+          } > env.txt
+          cat env.txt
+      - name: Cache dummy archives
+        id: cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            archive-participant-*.json
+            archive-participant-*.mp4
+          key: tune-dummy-${{ env.RESOLUTION }}-${{ env.FRAME_RATE }}-${{ env.DURATION }}-${{ env.SEED }}
+      - name: Generate dummy archives
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          SEED: ${{ env.SEED }}
+        run: |
+          # ソース数は 3 固定。participant ごとに seed + i を割り当てる
+          for i in 0 1 2; do
+            seed=$((SEED + i))
+            ./target/release/sora-archive-compositor generate-archive . \
+              --connection-id "participant-${i}" \
+              --resolution ${{ env.RESOLUTION }} \
+              --frame-rate ${{ env.FRAME_RATE }} \
+              --duration ${{ env.DURATION }} \
+              --seed "${seed}"
+          done
+          ls -la
+      - name: Run tune
+        run: |
+          case "${{ inputs.codec }}" in
+            nvcodec-h264) layout="layout-examples/tune-nvcodec-h264.jsonc" ;;
+            nvcodec-h265) layout="layout-examples/tune-nvcodec-h265.jsonc" ;;
+            nvcodec-av1) layout="layout-examples/tune-nvcodec-av1.jsonc" ;;
+          esac
+          ./target/release/sora-archive-compositor tune \
+            -l "${layout}" \
+            --trial-count ${{ inputs.trial-count }} \
+            --trial-timeout ${{ inputs.trial-timeout }} \
+            --frame-count ${{ env.FRAME_COUNT }} \
+            . 2>&1 | tee tune.txt
+      - name: Upload results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tune-${{ inputs.codec }}-nvcodec
+          path: |
+            env.txt
+            tune.txt
+            tune/
+
+  tune-video-toolbox:
+    name: Tune VideoToolbox (${{ inputs.codec }})
+    runs-on:
+      group: Self
+      labels: [self-hosted, macOS, ARM64]
+    timeout-minutes: 90
+    if: contains(fromJSON('["video-toolbox-h264", "video-toolbox-h265"]'), inputs.codec)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@c69e528904c52915e7f40e120fc7d49773bbb2a0 # master
+      - name: Install rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+      - name: Update PATH
+        run: echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+      - name: Install packages to build external dependencies
+        run: |
+          brew update
+          brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
+      - run: cargo build --release
+      - name: Environment info
+        run: |
+          {
+            echo "cpu: $(sysctl -n machdep.cpu.brand_string)"
+            echo "os: $RUNNER_OS $RUNNER_ARCH"
+            echo "rustc: $(rustc --version)"
+            echo
+            echo "physical cores: $(sysctl -n hw.physicalcpu)"
+            echo "logical cores: $(sysctl -n hw.logicalcpu)"
+            echo "memory bytes: $(sysctl -n hw.memsize)"
+          } > env.txt
+          cat env.txt
+      - name: Cache dummy archives
+        id: cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            archive-participant-*.json
+            archive-participant-*.mp4
+          key: tune-dummy-${{ env.RESOLUTION }}-${{ env.FRAME_RATE }}-${{ env.DURATION }}-${{ env.SEED }}
+      - name: Generate dummy archives
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          SEED: ${{ env.SEED }}
+        run: |
+          # ソース数は 3 固定。participant ごとに seed + i を割り当てる
+          for i in 0 1 2; do
+            seed=$((SEED + i))
+            ./target/release/sora-archive-compositor generate-archive . \
+              --connection-id "participant-${i}" \
+              --resolution ${{ env.RESOLUTION }} \
+              --frame-rate ${{ env.FRAME_RATE }} \
+              --duration ${{ env.DURATION }} \
+              --seed "${seed}"
+          done
+          ls -la
+      - name: Run tune
+        run: |
+          case "${{ inputs.codec }}" in
+            video-toolbox-h264) layout="layout-examples/tune-video-toolbox-h264.jsonc" ;;
+            video-toolbox-h265) layout="layout-examples/tune-video-toolbox-h265.jsonc" ;;
+          esac
+          ./target/release/sora-archive-compositor tune \
+            -l "${layout}" \
+            --trial-count ${{ inputs.trial-count }} \
+            --trial-timeout ${{ inputs.trial-timeout }} \
+            --frame-count ${{ env.FRAME_COUNT }} \
+            . 2>&1 | tee tune.txt
+      - name: Upload results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tune-${{ inputs.codec }}-video-toolbox
+          path: |
+            env.txt
+            tune.txt
+            tune/

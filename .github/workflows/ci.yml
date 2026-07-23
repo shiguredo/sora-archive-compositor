@@ -1,0 +1,232 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "develop"
+      - "feature/**"
+      - "hotfix/**"
+    paths-ignore:
+      - "**.md"
+
+env:
+  RUST_BACKTRACE: 1
+
+jobs:
+  ci:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - ubuntu-26.04
+    runs-on: ${{ matrix.os }}
+    # 依存する codec ライブラリ (dav1d / libvpx / opus / libyuv / svt-av1 / openh264) を
+    # 毎回ソースからビルドするため余裕を持たせる。rust-cache は target/ をキャッシュしない。
+    # 実測は 23 分 23 秒 (cargo check --all-targets 11 分 29 秒 + cargo test 11 分 13 秒 が支配的)
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: rustup update stable
+      # 一覧は docs/build.md の Ubuntu 向け手順と揃える。
+      # clang は codec crate の build.rs が bindgen (libclang) を使うために必要
+      - name: Install packages to build external dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config cmake clang
+      - uses: shiguredo/github-actions/.github/actions/rust-cache@main
+        with:
+          os: ${{ matrix.os }}
+          toolchain: stable
+      # fmt はプラットフォーム非依存なので 1 OS だけで十分
+      - run: cargo fmt --all --check
+        if: matrix.os == 'ubuntu-24.04'
+      - run: cargo check --workspace --all-targets
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      # FDK-AAC は feature 無効時にリンクされないことを確認する。
+      # バイナリ不在でも ldd が失敗するだけで grep が不一致になり全体が成功扱いになるため、
+      # 存在確認と素の ldd を前置きして空回りを防ぐ。
+      # grep は不一致で exit 1 になるため終了コードを反転させる
+      - name: FDK-AAC がリンクされないことを確認する
+        run: |
+          test -f target/debug/sora-archive-compositor
+          ldd target/debug/sora-archive-compositor
+          if ldd target/debug/sora-archive-compositor | grep -q fdk-aac; then exit 1; else exit 0; fi
+
+  # Apple Audio Toolbox / Video Toolbox 経路を検証する。
+  # ランナーは自己ホストの macOS ARM64 を 1 台使う。OS バージョンは実機に入っているものになる
+  # (自己ホストランナーは runs-on のラベルで選ぶ仕組みで、自動付与されるのは
+  # self-hosted / OS 種別 / アーキテクチャの 3 種だけなので yml から版数を指定できない)
+  test-apple-toolbox:
+    runs-on:
+      group: Self
+      labels: [self-hosted, macOS, ARM64]
+    # 実機なので target/ が残り 2 回目以降は速いが、初回はネイティブビルドが全部走る
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # 実機には Homebrew と rustup が入っている保証がないので毎回用意する
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@c69e528904c52915e7f40e120fc7d49773bbb2a0 # master
+      - name: Install rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+      - name: Update PATH
+        run: echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+      # 一覧は docs/build.md の macOS 向け手順と揃える。導入済みの formula は warning で成功する
+      - name: Install packages to build external dependencies
+        run: |
+          brew update
+          brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
+      # rust-cache は入れない。実機の ~/.cargo/ が run をまたいで残るので不要
+      #
+      # cargo fmt はプラットフォーム非依存で ci ジョブと重複するため回さない。
+      # fdk-aac 構成も回さない (docs/build.md のとおり macOS では Apple Audio Toolbox が使われる)
+      - run: cargo check --workspace --all-targets
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  # FDK-AAC を有効にした構成を検証する
+  # 実行時に共有ライブラリをロードするため SORA_ARCHIVE_COMPOSITOR_FDK_AAC_PATH を指定する
+  test-fdk-aac:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - ubuntu-26.04
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      SORA_ARCHIVE_COMPOSITOR_FDK_AAC_PATH: /usr/lib/x86_64-linux-gnu/libfdk-aac.so
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: rustup update stable
+      # ci ジョブの一覧に libfdk-aac-dev を足す。
+      # ヘッダは既定の /usr/include/fdk-aac/ に入るので環境変数の指定は不要
+      - name: Install packages to build external dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config cmake clang libfdk-aac-dev
+      - uses: shiguredo/github-actions/.github/actions/rust-cache@main
+        with:
+          os: ${{ matrix.os }}
+          toolchain: stable
+      # default = [] なので --features fdk-aac を単独で指定する
+      - run: cargo check --workspace --features fdk-aac --all-targets
+      - run: cargo clippy --workspace --features fdk-aac --all-targets -- -D warnings
+      - run: cargo test --workspace --features fdk-aac
+      # 実行時ロードで共有ライブラリを開けることを確認する
+      - name: FDK-AAC 共有ライブラリをロードできることを確認する
+        run: |
+          test -f "$SORA_ARCHIVE_COMPOSITOR_FDK_AAC_PATH"
+          ./target/debug/sora-archive-compositor list-codecs --fdk-aac "$SORA_ARCHIVE_COMPOSITOR_FDK_AAC_PATH" | grep fdk_aac
+
+  # NVIDIA Video Codec (nvcodec) 経路を検証する。
+  # hisui の test-nvidia-video-codec と同じ self-hosted 指定 (GPU + SDK 前提)。
+  # apt / setup-cuda-toolkit は置かない (runner 側に導入済みであることが前提)。
+  # OPENH264_PATH は置かない。decoder_tests の一部は無言スキップし得るが、
+  # nvcodec の主検証は e2e 側なので本ジョブでは扱わない
+  test-nvidia-video-codec:
+    runs-on:
+      group: Self
+      labels: [self-hosted, linux, x64, NVIDIA-Video-Codec-SDK]
+    # 初回はネイティブビルドが走る。warm な実機でも余裕を持たせる
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+      - name: Update PATH
+        run: echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+      - name: Setup CUDA PATH
+        run: |
+          echo "CUDA_PATH=/usr/local/cuda" >> $GITHUB_ENV
+          echo "/usr/local/cuda/bin" >> $GITHUB_PATH
+      - run: cargo check --workspace --features nvcodec --all-targets
+      - run: cargo clippy --workspace --features nvcodec --all-targets -- -D warnings
+      # GPU リソースの競合を避けるためテストは直列実行する
+      - run: cargo test --workspace --features nvcodec -- --test-threads=1
+
+  # OpenH264 の共有ライブラリを配置して decoder テストを実行する
+  test-openh264:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - ubuntu-26.04
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      # 版数は shiguredo_openh264 の external-dependencies メタデータに合わせる (v は付けない)
+      OPENH264_VERSION: "2.6.0"
+      # tests/decoder_tests.rs が読む名前。CLI が読む SORA_ARCHIVE_COMPOSITOR_OPENH264_PATH とは別物で、
+      # 未設定だと H.264 / VP9 / AV1 の decoder テストが無言でスキップされて緑になる
+      OPENH264_PATH: ${{ github.workspace }}/libopenh264.so
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: rustup update stable
+      - name: Install packages to build external dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config cmake clang
+      - uses: shiguredo/github-actions/.github/actions/rust-cache@main
+        with:
+          os: ${{ matrix.os }}
+          toolchain: stable
+      # 配布物は tar ではなく bzip2 圧縮された単一の共有ライブラリ
+      - name: Download libopenh264 v${{ env.OPENH264_VERSION }}
+        run: |
+          OPENH264_ARCHIVE="libopenh264-${OPENH264_VERSION}-linux64.8.so.bz2"
+          curl -fL -o "${OPENH264_ARCHIVE}" "https://ciscobinary.openh264.org/${OPENH264_ARCHIVE}"
+          bzip2 -d "${OPENH264_ARCHIVE}"
+          mv "libopenh264-${OPENH264_VERSION}-linux64.8.so" "${OPENH264_PATH}"
+      # OPENH264_PATH が消えたらここで落ちるようにする
+      - name: libopenh264 が配置されたことを確認する
+        run: test -f "${OPENH264_PATH}"
+      # ci ジョブとの差分は OPENH264_PATH の有無だけなので decoder テストに絞る。
+      # --nocapture を付けるのは無言スキップの検出のため (libtest は pass したテストの
+      # 標準エラー出力を捨てるので、付けないと文字列が出ず検証にならない)
+      - name: decoder テストを実行して無言スキップが起きていないことを確認する
+        # shell: bash を明示して pipefail を有効にする。
+        # 既定の bash -e では tee の終了コードが採用され cargo test の失敗が隠れる
+        shell: bash
+        run: |
+          cargo test --test decoder_tests -- --nocapture 2>&1 | tee /tmp/decoder.log
+          if grep -q '利用可能な H.264 デコーダーがない' /tmp/decoder.log; then exit 1; else exit 0; fi
+
+  # 全ジョブの結果を Slack に通知する。
+  # 失敗ジョブの集約は action 内部が GitHub API を叩いて行うので、needs は実行順序の確保が目的。
+  # slack_title は渡さない。どのジョブが落ちたかは action が算出しないため表現できず、
+  # 代わりにコミットメッセージがタイトルになる。schedule 起因かどうかは Event フィールドで判別できる
+  slack_notify:
+    needs:
+      - ci
+      - test-apple-toolbox
+      - test-fdk-aac
+      - test-nvidia-video-codec
+      - test-openh264
+    # permissions を明示すると未指定スコープは none になる。
+    # actions: read が無いと他ジョブの失敗を検出できず「成功扱いで通知なし」になり、
+    # contents: read が無いと private リポジトリでコミットメッセージが取れずタイトルが空になる
+    permissions:
+      actions: read
+      contents: read
+    # Slack へ POST するだけなので軽量イメージで足りる (hisui と同じ)
+    runs-on: ubuntu-slim
+    timeout-minutes: 20
+    # 他ジョブが失敗しても起動させる
+    if: always()
+    steps:
+      - name: Slack Notification
+        uses: shiguredo/github-actions/.github/actions/slack-notify@main
+        with:
+          status: ${{ job.status }}
+          slack_webhook: ${{ secrets.SLACK_WEBHOOK }}
+          # チャネル名に # は付けない
+          slack_channel: sora-tools
+          notify_mode: failure_and_fixed

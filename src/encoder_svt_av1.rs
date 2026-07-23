@@ -1,0 +1,111 @@
+use std::collections::VecDeque;
+use std::sync::Arc;
+
+use shiguredo_mp4::boxes::SampleEntry;
+
+use crate::{
+    encoder::VideoEncoderOptions,
+    types::EvenUsize,
+    video::{VideoFormat, VideoFrame},
+    video_av1,
+};
+
+#[derive(Debug)]
+pub struct SvtAv1Encoder {
+    inner: shiguredo_svt_av1::Encoder,
+    input_queue: VecDeque<Arc<VideoFrame>>,
+    output_queue: VecDeque<VideoFrame>,
+    sample_entry: Option<SampleEntry>,
+    width: EvenUsize,
+    height: EvenUsize,
+}
+
+impl SvtAv1Encoder {
+    pub fn new(options: &VideoEncoderOptions) -> crate::Result<Self> {
+        let width = options.width;
+        let height = options.height;
+        // 2026.1.0 で target_bitrate -> target_bit_rate へリネームされ、Encoder::new は所有権受け取りに変わった
+        let config = shiguredo_svt_av1::EncoderConfig {
+            target_bit_rate: options.bitrate,
+            width: width.get(),
+            height: height.get(),
+            fps_numerator: options.frame_rate.numerator.get(),
+            fps_denominator: options.frame_rate.denominator.get(),
+            ..options.encode_params.svt_av1.clone()
+        };
+        let inner = shiguredo_svt_av1::Encoder::new(config)?;
+        let sample_entry = Some(video_av1::av1_sample_entry(
+            width,
+            height,
+            inner.extra_data(),
+        )?);
+
+        Ok(Self {
+            inner,
+            input_queue: VecDeque::new(),
+            output_queue: VecDeque::new(),
+            sample_entry,
+            width,
+            height,
+        })
+    }
+
+    pub fn encode(&mut self, frame: Arc<VideoFrame>) -> crate::Result<()> {
+        if frame.format != VideoFormat::I420 {
+            return Err(crate::Error::new(
+                "assertion failed: frame.format == VideoFormat::I420",
+            ));
+        }
+
+        let (y_plane, u_plane, v_plane) = frame
+            .as_yuv_planes()
+            .ok_or_else(|| crate::Error::new("failed to obtain YUV planes"))?;
+        // 2026.1.0 で encode の入力が FrameData + EncodeOptions ベースへ再設計された
+        let frame_data = shiguredo_svt_av1::FrameData::I420 {
+            y: y_plane,
+            u: u_plane,
+            v: v_plane,
+        };
+        let encode_options = shiguredo_svt_av1::EncodeOptions {
+            force_keyframe: false,
+        };
+        self.inner.encode(&frame_data, &encode_options)?;
+        self.input_queue.push_back(frame);
+        self.handle_encoded_frames()?;
+
+        Ok(())
+    }
+
+    pub fn finish(&mut self) -> crate::Result<()> {
+        self.inner.finish()?;
+        self.handle_encoded_frames()?;
+        Ok(())
+    }
+
+    pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
+        self.output_queue.pop_front()
+    }
+
+    fn handle_encoded_frames(&mut self) -> crate::Result<()> {
+        // 2026.2.0 で Encoder::next_frame の戻り値が Result<Option<_>, Error> になった
+        while let Some(frame) = self.inner.next_frame()? {
+            // B フレームはない前提なので、タイムスタンプのいれかわりもない
+            let input_frame = self.input_queue.pop_front().ok_or_else(|| {
+                crate::Error::new("input queue is empty when handling encoded frame")
+            })?;
+
+            self.output_queue.push_back(VideoFrame {
+                source_id: None,
+                data: frame.data().to_vec(),
+                format: VideoFormat::Av1,
+                keyframe: frame.is_keyframe(),
+                width: self.width.get(),
+                height: self.height.get(),
+                timestamp: input_frame.timestamp,
+                duration: input_frame.duration,
+                sample_entry: self.sample_entry.take(),
+            });
+        }
+        Ok(())
+    }
+}

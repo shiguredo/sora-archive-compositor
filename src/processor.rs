@@ -1,0 +1,191 @@
+use crate::audio::AudioData;
+use crate::media::{MediaSample, MediaStreamId};
+use crate::stats::ProcessorStats;
+use crate::video::VideoFrame;
+
+pub trait MediaProcessor {
+    fn spec(&self) -> MediaProcessorSpec;
+
+    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()>;
+    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput>;
+
+    fn set_error(&self) {
+        self.spec().stats.set_error();
+    }
+}
+
+pub struct BoxedMediaProcessor(Box<dyn 'static + Send + MediaProcessor>);
+
+impl BoxedMediaProcessor {
+    pub fn new<P: 'static + Send + MediaProcessor>(processor: P) -> Self {
+        Self(Box::new(processor))
+    }
+}
+
+impl std::fmt::Debug for BoxedMediaProcessor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BoxedMediaProcessor")
+            .finish_non_exhaustive()
+    }
+}
+
+impl MediaProcessor for BoxedMediaProcessor {
+    fn spec(&self) -> MediaProcessorSpec {
+        self.0.spec()
+    }
+
+    fn process_input(&mut self, input: MediaProcessorInput) -> crate::Result<()> {
+        self.0.process_input(input)
+    }
+
+    fn process_output(&mut self) -> crate::Result<MediaProcessorOutput> {
+        self.0.process_output()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaProcessorWorkloadHint {
+    /// I/O 集約的なプロセッサ
+    IoIntensive,
+
+    /// CPU 集約的なプロセッサ
+    CpuIntensive {
+        /// プロセッサの処理の重さの目安
+        cost: std::num::NonZeroUsize,
+    },
+}
+
+impl MediaProcessorWorkloadHint {
+    // 各処理毎のワークロードヒントの値。
+    //
+    // これはヒューリスティックな値であって、実際のコストは入力やレイアウトによって
+    // 大きく変動する可能性がある。
+    //
+    // そういったケースにも対応するためには、プログラムの実行時に動的に値を決定するか、
+    // ワークスティールのように実際の負荷状況を考慮してのリバランシングが必要となる。
+    //
+    // そういった手法は実装も大変で、効果が見合うかどうかが不明なので、まずは
+    // 今のようなヒューリスティックな値を使って運用してみて、様子を見ることにする。
+    pub const READER: Self = Self::IoIntensive;
+    pub const WRITER: Self = Self::IoIntensive;
+    pub const CPU_MISC: Self = Self::cpu_intensive(1);
+    pub const AUDIO_DECODER: Self = Self::cpu_intensive(1);
+    pub const AUDIO_MIXER: Self = Self::cpu_intensive(1);
+    pub const AUDIO_ENCODER: Self = Self::cpu_intensive(1);
+    pub const VIDEO_DECODER: Self = Self::cpu_intensive(2);
+    pub const VIDEO_MIXER: Self = Self::cpu_intensive(10);
+    pub const VIDEO_ENCODER: Self = Self::cpu_intensive(10);
+
+    const fn cpu_intensive(cost: usize) -> Self {
+        Self::CpuIntensive {
+            cost: std::num::NonZeroUsize::new(cost).expect("bug"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MediaProcessorSpec {
+    pub input_stream_ids: Vec<MediaStreamId>,
+    pub output_stream_ids: Vec<MediaStreamId>,
+    pub workload_hint: MediaProcessorWorkloadHint,
+    pub stats: ProcessorStats,
+}
+
+#[derive(Debug)]
+pub struct MediaProcessorInput {
+    pub stream_id: MediaStreamId,
+    pub sample: Option<MediaSample>, // None なら EOS を表す
+}
+
+impl MediaProcessorInput {
+    pub fn eos(stream_id: MediaStreamId) -> Self {
+        Self {
+            stream_id,
+            sample: None,
+        }
+    }
+
+    pub fn sample(stream_id: MediaStreamId, sample: MediaSample) -> Self {
+        Self {
+            stream_id,
+            sample: Some(sample),
+        }
+    }
+
+    pub fn audio_data(stream_id: MediaStreamId, data: AudioData) -> Self {
+        Self {
+            stream_id,
+            sample: Some(MediaSample::audio_data(data)),
+        }
+    }
+
+    pub fn video_frame(stream_id: MediaStreamId, frame: VideoFrame) -> Self {
+        Self {
+            stream_id,
+            sample: Some(MediaSample::video_frame(frame)),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum MediaProcessorOutput {
+    Processed {
+        stream_id: MediaStreamId,
+        sample: MediaSample,
+    },
+    Pending {
+        // 入力を待機しているストリームの ID
+        //
+        // None の場合は任意のストリームを待機していることを示す
+        //
+        // [NOTE]
+        // `Mp4Writer` のように複数の入力をとるプロセッサーが
+        // 複数いた場合にデッドロックが発生する可能性がある
+        // （たとえば、片方が音声ストリームを、もう片方が映像ストリームを優先して処理するような場合）
+        //
+        // ただし、通常はそういったプロセッサーは、
+        // 一番最後のフェーズにひとつだけ存在することが多いはずなので
+        // これが実際に問題となることはほぼないはず
+        //
+        // もし発生した場合には `SyncSender` のバッファサイズを増やすか、
+        // 問題となっているプロセッサーの実装を見直す必要がある
+        awaiting_stream_id: Option<MediaStreamId>,
+    },
+    Finished,
+}
+
+impl MediaProcessorOutput {
+    pub fn expect_processed(self) -> Option<(MediaStreamId, MediaSample)> {
+        if let Self::Processed { stream_id, sample } = self {
+            Some((stream_id, sample))
+        } else {
+            None
+        }
+    }
+
+    pub fn pending(awaiting_stream_id: MediaStreamId) -> Self {
+        Self::Pending {
+            awaiting_stream_id: Some(awaiting_stream_id),
+        }
+    }
+
+    pub fn awaiting_any() -> Self {
+        Self::Pending {
+            awaiting_stream_id: None,
+        }
+    }
+
+    pub fn audio_data(stream_id: MediaStreamId, data: AudioData) -> Self {
+        Self::Processed {
+            stream_id,
+            sample: MediaSample::audio_data(data),
+        }
+    }
+
+    pub fn video_frame(stream_id: MediaStreamId, frame: VideoFrame) -> Self {
+        Self::Processed {
+            stream_id,
+            sample: MediaSample::video_frame(frame),
+        }
+    }
+}
