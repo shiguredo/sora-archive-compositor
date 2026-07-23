@@ -1,0 +1,12 @@
+[package]
+name = "sora-archive-compositor"
+version = "2026.1.0-canary.0"
+edition = "2024"
+rust-version = "1.95"
+description = "Sora Archive Compositor"
+readme = "README.md"
+homepage = "https://github.com/shiguredo/sora-archive-compositor"
+repository = "https://github.com/shiguredo/sora-archive-compositor"
+license = "Apache-2.0"
+
+[dependencies]
