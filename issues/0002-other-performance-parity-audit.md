@@ -21,140 +21,147 @@ sora-archive-compositor は hisui 2025.3.2 (stable) の Sora 録画合成機能�
 
 ## 現状
 
-- `compose` サブコマンドは `src/subcommand_compose.rs` → `src/composer.rs` → `src/encoder.rs` の経路で動作する。stdout JSON に `elapsed_seconds` と、encoder / decoder / mixer / muxer 別の `total_*_processing_seconds` (`total_audio_decoder_processing_seconds`, `total_video_decoder_processing_seconds`, `total_audio_encoder_processing_seconds`, `total_video_encoder_processing_seconds`, `total_audio_mixer_processing_seconds`, `total_video_mixer_processing_seconds` 等) を出力するため、内訳ベースでの比較が可能。
+- `compose` サブコマンドは `src/subcommand_compose.rs` → `src/composer.rs` → `src/encoder.rs` の経路で動作する。stdout JSON に `elapsed_seconds` と processor 内訳を出力する。`--stats-file` で詳細統計も取れる。
+- `generate-archive` (`src/subcommand_generate_archive.rs`) でダミー録画 (映像 MP4 + archive JSON) を生成できる。`--duration` / `--codec` / `--resolution` / `--seed` / `--connection-id` を指定可能。現状の生成物は映像のみ (`"audio": false`)。
 - 移植過程の変更のうち性能へ影響を与えうる主なもの:
   - log → tracing : ログのフォーマット・ANSI 色付け・stderr 経由の重さ
   - orfail 撤廃 : エラー型の変更に伴うホットパスの `Result` サイズ差
   - indicatif 撤廃 : `src/progress.rs` の内製プログレスバー
   - `shiguredo_*` crates.io 版へ更新 : 依存 codec / MP4 writer の版差
-  - fdk-aac 実行時ロード : Linux のみ
-  - audio_toolbox cfg 整理 : macOS のみ
+  - audio_toolbox cfg 整理 : macOS のみ (本 issue では音声経路は対象外)
   - NVENC EOS flush 修正 / async backpressure 導入 : NVENC 経路のみ
-- 現状 `sora-archive-compositor` にも `hisui@2025.3.2` にも、両者を突き合わせる性能計測スクリプトは存在しない (`ls scripts/` は 0、`hisui@2025.3.2` の `git ls-tree` でも同様)。
-- `testdata/` 直下の Sora 録画サンプル (`archive-blue-640x480-*.mp4`, `archive-red-320x320-*.mp4`, `archive-black-silent.webm`) は 1〜数秒規模の小サイズ (数 KB) で、`testdata/e2e/*/` 配下も同様。**実運用に近い 1〜数分規模の入力は既存 testdata に含まれない**。本 issue の実施範囲でサンプル収録もしくは同等サンプルの生成が必要になる (再現手段は本 issue 中で確立する)。
+- 現状、性能計測用の再利用スクリプトはリポジトリに無い (`scripts/` も未作成)。
 
 ## 設計方針
 
 ### 対象範囲
 
-- **対象**: `compose` サブコマンドの録画合成処理のみ。`tune` / `vmaf` / `inspect` / `list-codecs` はスコープ外。
-- **計測項目 (最低)**:
-  - 総処理時間 (compose の壁時計時間 = stdout JSON の `elapsed_seconds`、および外部からの `/usr/bin/time -p` 計測)
-  - stdout JSON の `total_*_processing_seconds` (audio/video の encoder / decoder / mixer)
-  - CPU 利用の傾向 (Linux で `/usr/bin/time -v` が使えれば `Elapsed (wall clock)` / `User time` / `System time` / `Percent of CPU this job got` / `Maximum resident set size (kbytes)` を採取)
-  - macOS では `/usr/bin/time -l` で peak RSS 相当を採取 (`maximum resident set size`)
-- **計測しない項目**: `tune` サブコマンドのパレートフロント収束速度、`vmaf` のスコア絶対値、encoder の bit-exact な出力差 (これらは書面の差分監査の担当領域、または libvmaf 版差の範囲で許容済み)。
+- **対象**: `compose` サブコマンドの録画合成のうち、**映像**の decode / mix / encode と壁時計時間。
+- **対象外 (音声)**: 音声の encode / decode / mixer。映像に比べ負荷が低く計測誤差に埋もれるため、最初から対象外とする。入力も映像のみでよい。Opus / AAC / fdk-aac 経路の性能比較は本 issue の完了条件に含めない。
+- **対象外 (その他)**: `tune` / `vmaf` / `inspect` / `list-codecs`。encoder の bit-exact な出力差や VMAF 絶対値は書面の差分監査側。
+
+### 計測項目 (最低)
+
+- 総処理時間: compose stdout JSON の `elapsed_seconds`、および `/usr/bin/time` の wall clock
+- 可能なら `--stats-file` から映像系 processor の `total_*_processing_seconds` 内訳
+- peak RSS: Linux は `/usr/bin/time -v`、macOS は `/usr/bin/time -l`
 
 ### 比較対象のコーデック組み合わせ
 
-以下を最低ケースとして選ぶ (`compose` の主要経路を代表)。
+音声は持たない。最低ケースは次の 3 つ。
 
-| # | 映像入力 | 音声入力 | 出力映像 encoder | 出力音声 encoder | プラットフォーム | 備考 |
-|---|---|---|---|---|---|---|
-| 1 | VP9 | Opus | VP9 (libvpx) | Opus | Linux / macOS | 定番。既定 codec。トランスコード有 |
-| 2 | H.264 | Opus | H.264 (openh264) | Opus | Linux / macOS | openh264 経路の代表 |
-| 3 | H.265 | Opus | H.265 (VideoToolbox) | Opus | macOS のみ | macOS 経路の代表。hisui 側でも同様 |
-| 4 | VP9 | Opus | AV1 (svt-av1) | Opus | Linux / macOS | svt-av1 経路 |
-| 5 | H.264 | Opus | H.264 (openh264) | AAC (fdk-aac) | Linux のみ | fdk-aac 実行時ロードの影響を測る |
-| 6 (任意) | H.264 | Opus | H.264 (NVENC) | Opus | Linux (NVIDIA GPU 環境) | 環境がある場合のみ |
+| # | 映像入力 | 出力映像 encoder | プラットフォーム | 備考 |
+|---|---|---|---|---|
+| 1 | VP9 | VP9 (libvpx) | Linux / macOS | 定番。既定 codec |
+| 2 | H.264 | H.264 (openh264) | Linux / macOS | openh264 経路 |
+| 3 | VP9 | AV1 (svt-av1) | Linux / macOS | svt-av1 経路 |
 
-環境固有の case (macOS, NVENC, fdk-aac) は「計測できたら残す」扱い。1・2・4 は Linux / macOS どちらでも実施する。
+任意 (環境があるときだけ):
+
+| # | 映像入力 | 出力映像 encoder | プラットフォーム | 備考 |
+|---|---|---|---|---|
+| A | H.265 | H.265 (VideoToolbox) | macOS のみ | |
+| B | H.264 | H.264 (NVENC) | Linux (NVIDIA GPU) | |
 
 ### テストデータの選定
 
-- **既存 `testdata/` の Sora 録画サンプルは短すぎる**ため本 issue では使わない。既存サンプルは integration テスト用途で、性能比較には向かない。
-- 本 issue のための計測用サンプルを別途用意する。要件は「Sora の実運用に近い 1〜数分の録画」で、以下いずれかで用意する:
-  - Sora の canary / dev 環境でダミー通話を録音した mp4 / webm を、`testdata/` とは別ディレクトリ (例: `testdata/perf/` 案) に配置する。**個人特定可能な音声・映像は絶対に含めない** (`shiguredo-no-secrets` 準拠)。
-  - もしくは既存の合成可能な素材 (フリー素材の映像 + 無音) から Sora 録画互換フォーマット (`.mp4` / `.webm`) を作って配置する。
-- 選定したサンプルはコミットせずローカルで扱うか、公開に問題ない素材のみコミットするかを実装時に判断する。**現時点では issue 本文に「〇〇のサンプルを使った」記載はしない (機密回避)**。実施記録に「素材の入手経路 / 生成方法」だけ書き残す。
+- **既存 `testdata/` の短尺サンプルは使わない** (integration テスト用途で性能比較には短すぎる)。
+- **入力は `generate-archive` で生成する** (既定方針)。
+  - 長さ: **120 秒**
+  - 解像度: `1280x720`、フレームレート: 30 fps を目安とする
+  - ソース数: **2 本** (グリッド合成が入る程度)。`--connection-id` と出力先ディレクトリを分けて 2 回生成する
+  - コーデック: ケースに合わせて VP9 / H.264 / (任意で H.265) を生成する
+  - `--seed` を固定し、負荷プロファイルを安定させる
+- 生成物はコミットしない。ローカルまたは一時ディレクトリに置き、再現手順に生成コマンドを残す。
+- 実 Sora 録画の利用は任意の追加手段とし、必須にしない (機密・配布の問題を避ける)。
+
+### 計測スクリプト
+
+今後の再利用も見据え、本 issue の一環で Python スクリプトを `scripts/` に追加する。
+
+必須要件:
+
+- **バイナリ差し替え**: `--bin PATH` (未指定時は `target/release/sora-archive-compositor`)。hisui 計測時は `--bin ../hisui-2025.3.2/target/release/hisui` のように上書きする
+- 引数: 入力ディレクトリ、layout、実行回数、出力ディレクトリ、ラベル (結果ファイル名用)
+- 1 回の計測で compose の stdout JSON と `/usr/bin/time` の結果を保存する。可能なら `--stats-file` も保存する
+- ウォームアップ (先頭 1 回破棄) と中央値集計をスクリプト側または付属の summarize で扱えるようにする
+- 機密パスをハードコードしない (引数または環境変数で渡す)
+
+案: `scripts/perf_compose.py` (単体実行 + summarize)。A/B 交互実行があると熱バイアスを減らせる。
 
 ### 計測環境と手順
 
-- **同一ホスト**で hisui 2025.3.2 と sora-archive-compositor の両方を計測する (ハードウェア差を排除)。macOS 上での hisui build には `../hisui` の worktree ないしは `git worktree add ../hisui-2025.3.2 2025.3.2` を用いる。
-- **リリースビルド** (`cargo build --release`) で計測する。debug ビルドは使わない。
-- **同一入力・同一 layout.json** で両バイナリを実行する。hisui 側 layout の `HISUI_*` 環境変数と、sora-archive-compositor 側の `SORA_ARCHIVE_COMPOSITOR_*` 環境変数の対応に注意する。layout.json は両者で同じキー構成 (encode_params 系) を使えるので同一ファイルを流用する (`docs/layout_encode_params.md` を参照)。
-- **実行回数**: 各ケースにつき最低 3 回、可能なら 5 回。**最初の 1 回はウォームアップとして破棄** し、残りの中央値 (または平均) を比較値とする。
-- **非対称な回し方をしない**: 「hisui は 5 回・sora-archive-compositor は 1 回」といった条件不揃いは禁止。同数回す。
-- **他プロセス影響の低減**: 計測中は他の重いプロセスを停止する。macOS ではスリープ抑制 (`caffeinate`) を使う判断を実装時に行う。
-- 計測項目の採取は shell script 相当で機械的に行う。実装時に `scripts/perf-compare.sh` 等を追加してよい (再現可能性を残す。ただし機密素材のパスは script 内に書かない・環境変数で渡す形にする)。
+- **同一ホスト**で hisui 2025.3.2 と sora-archive-compositor を計測する。
+- hisui は **`2025.3.2` タグの release バイナリに限定する**。`git worktree add ../hisui-2025.3.2 2025.3.2` 等で用意し、`cargo build --release` する。タグ以外のバイナリや「近い release」へのフォールバックはしない。ビルド不能なら本 issue を保留し、原因を本文に記録する。
+- sora-archive-compositor も `cargo build --release`。
+- **同一入力・意味論的に同等な layout** で両バイナリを実行する。env 名 (`HISUI_*` / `SORA_ARCHIVE_COMPOSITOR_*`) の差だけ吸収する。
+- **実行回数**: 各ケース最低 3 回、可能なら 5 回。**先頭 1 回はウォームアップ破棄**、残りは中央値で比較。両バイナリ同数。交互実行を推奨。
+- macOS では計測中のスリープ抑制 (`caffeinate`) を検討する。
 
 ### 判定基準
 
-- **10% 以内の悪化は許容**: 計測ノイズ + 依存 crate の版差 + ANSI 色付き tracing のオーバーヘッド等の範囲。ただし複数ケース (2 ケース以上) で **一貫して 5% 前後の悪化** が観測される場合は、原因の当たりだけ本文に書き残す (別 issue にするかは追って判断)。
-- **10% を超える悪化**: 要調査扱い。原因分析の当たりを付け、修正 issue を別途 `create-issue` 経由で起票する。**修正の実装完了は本 issue の完了条件に含めない**。書面の差分監査の派生 issue の扱いに揃える。
-- **改善方向 (sora-archive-compositor が速い)**: 記録に残し、原因の推定を書く。改善は許容だが「なぜ速くなったか」を書けないままだと後で degrade したときの参照点として使えないので、当たりだけでも記録する。
+- **10% 以内の悪化は許容** (ノイズ + 依存版差 + tracing 等)。複数ケースで **一貫して 5% 前後の悪化** なら原因の当たりを本文に残す。
+- **10% 超の悪化**: 別 issue を `create-issue` で起票。修正完了は本 issue の完了条件に含めない。
+- **改善**: 記録し、理由の当たりを書く。
 
 ### 出力物
 
-- 本 issue 本文の「性能比較結果」節に、ケースごとに以下を追記する:
-  - ケース番号 / コーデック組み合わせ / プラットフォーム / 入力サンプルの概要 (機密回避のため詳細は書かない)
-  - hisui 2025.3.2 の計測値 (elapsed / 内訳 / peak RSS)
-  - sora-archive-compositor の計測値
-  - 差分率と判定 (許容 / 悪化 / 改善)
-  - 考察 (推定原因、または追跡不要な理由)
-- 派生 issue を起票した場合は番号を書き戻す。
-- 計測に使ったスクリプト (追加した場合) と手順は「再現手順」小節にコマンドラインベースで残す。
+- 本 issue の「性能比較結果」節にケースごとの計測値・差分率・判定・考察を追記する
+- 派生 issue があれば番号を書き戻す
+- スクリプトの使い方と入力生成コマンドを「再現手順」に残す
 
-### 本 issue ではコード変更を行わない (原則)
+### 本 issue で触ってよいコード
 
-- 主目的は監査であり、性能改善のためのコード修正は本 issue のスコープ外。悪化を検出しても本 issue で修正しない (別 issue で対応)。
-- 例外は「計測のための script 追加」のみ。`scripts/` 配下への追加は許容 (`develop_direct` 方針でも develop 直接コミットで進めてよい)。
-- Rust コード (`src/**/*.rs`) の変更は本 issue のブランチでは原則行わない。
+- 主目的は監査。性能改善の Rust 修正はスコープ外 (悪化時は別 issue)。
+- **例外**: 計測用 Python スクリプトの `scripts/` 追加は本 issue で行う。
+- `src/**/*.rs` の変更は原則行わない。
 
 ## 完了条件
 
-- hisui 2025.3.2 と sora-archive-compositor の両方を同一ホスト・同一入力・同一実行回数 (最低 3 回、うち初回破棄) で計測した結果が本 issue 本文の「性能比較結果」節に追記されている。
-- 最低ケース (VP9→VP9, H.264→H.264, VP9→AV1) が Linux / macOS のどちらか (または両方) で計測済みで、環境固有ケース (VideoToolbox H.265, fdk-aac, NVENC) は「実施した」または「環境不足で未実施」のいずれかが明記されている。
-- 各ケースについて差分率と判定 (許容 / 悪化 / 改善) が記録されている。
-- 10% を超える悪化が観測された場合、修正のための別 issue が `create-issue` 経由で起票され、その番号が本文に書き戻されている。
-- 5% 前後の一貫した悪化が観測された場合、原因の当たり (または「深追い不要」の判断根拠) が本文に記載されている。
-- 計測に使ったスクリプト (追加した場合) と再現手順が「再現手順」節にコマンドラインで残っている。
-- **本 issue の完了は上記の追記まで**。派生 issue の実装完了・polished・closed は本 issue の完了条件に含めない。
+- hisui **2025.3.2 タグ**と sora-archive-compositor を、同一ホスト・同一 `generate-archive` 入力 (120 秒・映像 2 ソース)・同一実行回数 (最低 3 回、うち初回破棄) で計測した結果が「性能比較結果」に追記されている
+- 最低ケース (VP9→VP9, H.264→H.264, VP9→AV1) が Linux / macOS のどちらか (または両方) で計測済みである
+- 任意ケース (VideoToolbox H.265, NVENC) は「実施した」または「環境不足で未実施」が明記されている
+- 各ケースについて差分率と判定 (許容 / 悪化 / 改善) がある
+- 10% 超悪化があれば別 issue が起票され番号が書き戻されている
+- 5% 前後の一貫悪化があれば当たり (または深追い不要の根拠) が本文にある
+- `scripts/` の Python 計測スクリプトと再現手順 (入力生成コマンド含む) が残っている
+- **本 issue の完了は上記の追記まで**。派生 issue の実装完了は含めない
 
 ## 解決方法
 
 ### 実施ステップ
 
-1. **`hisui@2025.3.2` の release バイナリを準備する**:
-   - `git -C ../hisui worktree add ../hisui-2025.3.2 2025.3.2` で 2025.3.2 の worktree を切る (もしくは既存 worktree があればそれを使う)。
-   - `cargo build --release` で `../hisui-2025.3.2/target/release/hisui` を得る。ビルドが通らない (依存の変化などで) 場合は原因を記録し、実施時点で最も近い hisui のバイナリを使う判断を行う (この場合は「厳密には 2025.3.2 と等価ではない」旨を実施記録に残す)。
-2. **sora-archive-compositor の release バイナリを準備する**:
-   - `cargo build --release` で `target/release/sora-archive-compositor` を得る。
-3. **計測用サンプルを用意する**:
-   - 「設計方針: テストデータの選定」に従い、実運用に近い 1〜数分規模の Sora 録画互換サンプルを用意する。機密回避のためコミットするか否かは実装時に判断。
-4. **layout.json を用意する**:
-   - `layout-examples/compose-default.jsonc` (sora-archive-compositor) と `../hisui-2025.3.2/layout-examples/compose-default.jsonc` (hisui) を比較し、両者で同一に動く layout.json を用意する。差分がある場合は、性能比較目的では意味論的に同等な設定に揃える (製品名 URL 等の cosmetic 差は無視)。
-5. **計測スクリプトを用意する** (任意、`scripts/perf-compare.sh` 案):
-   - 引数として (a) バイナリパス、(b) 入力ディレクトリ、(c) layout.json、(d) 実行回数を取り、`/usr/bin/time -p` / `/usr/bin/time -v` (Linux) / `/usr/bin/time -l` (macOS) 経由で計測して stdout JSON もあわせて保存する形。
-   - スクリプト内には機密素材のパスを書かない (環境変数か引数で渡す)。
-6. **各ケースを計測する**:
-   - 「設計方針: 比較対象のコーデック組み合わせ」の表に沿って、hisui / sora-archive-compositor をそれぞれ最低 3 回 (初回破棄) 実行する。
-   - 同ケース内では実行順序を hisui → sora-archive-compositor で交互に回す (熱状態の偏りを減らす)。
-7. **結果を集計する**:
-   - ケースごとに elapsed_seconds、`total_*_processing_seconds` 内訳、peak RSS の中央値を計算する。
-   - hisui 2025.3.2 に対する sora-archive-compositor の差分率を計算する: `(sora - hisui) / hisui * 100 [%]`。
-   - 判定を付ける (許容 / 悪化 / 改善)。
-8. **本 issue 本文に「性能比較結果」節を追記する**:
-   - ケースごとの表と考察を書き残す。
-   - 派生 issue を起票する必要があれば `create-issue` スキル経由で起票し、番号を本文に書き戻す。
-9. **再現手順を残す**:
-   - コマンドラインベースで、`scripts/perf-compare.sh` (追加した場合) の使い方と、layout.json / サンプルの用意方法を残す。
+1. **hisui `2025.3.2` の release バイナリを準備する**
+   - `git worktree add ../hisui-2025.3.2 2025.3.2` (または同等) のあと `cargo build --release`
+   - タグ以外へのフォールバックはしない。ビルド不能なら保留して本文に記録する
+2. **sora-archive-compositor の release バイナリを準備する** (`cargo build --release`)
+3. **`generate-archive` で計測入力を生成する**
+   - 120 秒・`1280x720`・30 fps・seed 固定・ソース 2 本
+   - ケースごとに必要な入力コーデック (VP9 / H.264 / 任意 H.265) を用意する
+4. **layout を用意する**
+   - `layout-examples/compose-default.jsonc` をベースに、ケースごとの `video_codec` を揃えた layout を用意する
+   - hisui / SAC で意味論的に同等になるよう env 差だけ吸収する
+5. **Python 計測スクリプトを `scripts/` に追加する**
+   - `--bin` でバイナリパスを上書き可能にする
+   - compose + `/usr/bin/time` (+ 任意で `--stats-file`) の結果を保存し、中央値集計できるようにする
+6. **各ケースを計測する** (hisui と SAC を交互・同数)
+7. **結果を集計し、判定を付ける**
+8. **「性能比較結果」と「再現手順」を本文に追記する** (派生 issue があれば起票して番号を書く)
 
 ### リスク・留意点
 
-- **hisui 2025.3.2 のビルド失敗リスク**: 依存 crate や toolchain の変化でビルドが通らない可能性がある。その場合は最近の hisui release バイナリ (公式配布 tar など) を使うか、hisui 側の Cargo.lock を厳密に維持した状態でビルドを試みる。ビルド不能な場合は本 issue の実施を保留し、対処方針を issue 内に記録する。
-- **計測ノイズ**: 単一ホストでも他プロセスの影響で数 % はブレる。この issue の判定基準は 10% を境にしているので、複数回計測と中央値の採用でノイズを吸収する。
-- **プラットフォーム偏り**: VideoToolbox / NVENC / fdk-aac のように環境固有の経路は片方の OS でしか計測できない。網羅は完了条件から外し、「実施した」または「環境不足で未実施」の明記のみを完了条件にする。
-- **layout.json の差**: `HISUI_*` → `SORA_ARCHIVE_COMPOSITOR_*` の env 変数リネームなど、layout.json 側で書き分けが必要な場合は意味論的に同等な設定に揃える。
-- **機密素材の扱い**: Sora 録画を実運用データで作る場合、`shiguredo-no-secrets` に従って個人特定可能な音声・映像を含めない。issue 本文にサンプル内容を書かない。
+- **hisui 2025.3.2 のビルド失敗**: タグ固定のためフォールバックしない。不能なら実施保留。
+- **計測ノイズ**: 複数回 + 中央値で吸収する。判定の主境は 10%。
+- **プラットフォーム偏り**: VT / NVENC は任意。必須 3 ケースの実施を完了の軸にする。
+- **layout / env 差**: 意味論的同等性を優先する。
 
 ## 参考
 
-- hisui 2025.3.2 との書面ベース差分監査: 機能差の棚卸し。本 issue は「性能差の棚卸し」で対を成す。
-- 既存 testdata: integration テスト用途。性能比較用には短すぎる。
-- `HISUI_*` → `SORA_ARCHIVE_COMPOSITOR_*` リネーム: layout.json 揃えの参考。
-- `shiguredo_*` crates.io 版への更新: 依存 crate 版差の識別に使う。
-- NVENC EOS flush / async backpressure: NVENC 経路の変更点。
+- hisui 2025.3.2 との書面ベース差分監査: 機能差の棚卸し。本 issue は性能差の棚卸しで対を成す。
+- `generate-archive`: 計測入力の生成手段。
+- `HISUI_*` → `SORA_ARCHIVE_COMPOSITOR_*`: layout 揃えの参考。
+- `shiguredo_*` crates.io 版への更新: 依存版差の識別。
+- NVENC EOS flush / async backpressure: NVENC 任意ケースの変更点。
 
 ## 性能比較結果
 
