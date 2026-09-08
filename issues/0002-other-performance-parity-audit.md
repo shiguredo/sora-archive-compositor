@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-07-31
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-08
 - Model: Opus 4.7
 - Branch: feature/other-performance-parity-audit
 - Polished: {YYYY-MM-DD}
@@ -132,7 +132,15 @@ sora-archive-compositor は hisui (stable) の Sora 録画合成機能を切り�
 
 ## 解決方法
 
-### 実施ステップ
+macOS で hisui 2025.3.3 と SAC の `compose` 性能を計測し、結果・再現手順・参考仮説を本文に残したうえで closed にした。
+
+- `scripts/perf_compose.py` と `scripts/README.md` を追加した
+- 必須ケース相当 (VP9→VP9 / H.264→H.264 は VT 代替 / VP9→AV1) と任意の H.265 VT を計測し、いずれも改善 (デグレ起票なし)
+- 出力 MP4 の解像度・尺・フレーム数は一致。ファイルサイズもほぼ同水準 (VT はバイト一致、AV1 は約 −1.5%)
+- 改善理由は依存コーデック世代差の観察を **参考・根拠弱い** として追記したのみ (因果未検証、深追いしない)
+- 未実施のまま残すもの (本 issue の完了条件外または任意): ソース 3 本の再計測、openh264 本線、Linux / NVENC、hisui `2025.3.2` タグ固定ビルド
+
+### 実施時の手順メモ
 
 1. **hisui の release バイナリを準備する** (版を本文に記録する)
 2. **sora-archive-compositor の release バイナリを準備する** (`cargo build --release`)
