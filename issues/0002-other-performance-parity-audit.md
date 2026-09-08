@@ -34,7 +34,7 @@ sora-archive-compositor は hisui (stable) の Sora 録画合成機能を切り�
 - **macOS での一式計測は実施済み** (詳細は「性能比較結果」)。比較対象バイナリは当初案の hisui `2025.3.2` タグではなく、手元で用意できた crates.io **hisui 2025.3.3** (`~/.cargo/bin/hisui`) とした。タグ固定ビルドとの差分は未確認。
 - **openh264 経路は未計測**。計測ホストの `/usr/local/lib` は OpenH264 **2.5.0** で、ビルドが要求する **2.6.0** と不一致。手元の 2.6.0 では `generate-archive --codec H264` が `Annex B input has an empty NAL unit` で失敗した。そのため H.264 ケースは **VideoToolbox** 経路で代替計測した。
 - **Linux / NVENC は未実施**。
-- 改善理由の当たり付けは未完了 (次ステップ)。
+- 改善理由の当たりは「性能比較結果」に **参考情報** として追記済み (根拠は弱く、深追いはしない)。
 
 ## 設計方針
 
@@ -146,7 +146,7 @@ sora-archive-compositor は hisui (stable) の Sora 録画合成機能を切り�
 6. **各ケースを計測する** (hisui と SAC を交互・同数を推奨)
 7. **結果を集計し、判定を付ける**
 8. **「性能比較結果」と「再現手順」を本文に追記する** (派生 issue があれば起票して番号を書く)
-9. **改善理由の当たりを本文に追記する** (次ステップ)
+9. **改善理由の当たりを本文に追記する** (軽い調査まで。深追いはしない)
 
 ### リスク・留意点
 
@@ -211,13 +211,31 @@ sora-archive-compositor は hisui (stable) の Sora 録画合成機能を切り�
 
 - **mixer はほぼ同等**。差の主因は decoder / encoder 側。
 - ソフトコーデック (VP9 / AV1) では SAC の decode・encode 双方が大幅に短い。
-- VT 系では SAC の decode が短く、encode 処理秒は hisui より長いが、壁時計全体では SAC が勝つ (待ち・並列・その他の差の可能性。要調査)。
+- VT 系では SAC の decode が短く、encode 処理秒は hisui より長いが、壁時計全体では SAC が勝つ。
 
 ### 判定まとめ
 
 - 計測した全ケースで **10% 超の悪化は無し**。いずれも改善。
 - デグレ起票は不要。
-- **残作業**: 改善理由の当たり付け、ソース 3 本の確認計測 (任意)、openh264 / Linux / NVENC (環境次第)。
+- **残作業**: ソース 3 本の確認計測 (任意)、openh264 / Linux / NVENC (環境次第)。改善理由の深追いは必須としない。
+
+### 改善理由の当たり (参考・根拠は弱い)
+
+**断定しない。** 依存版の突き合わせと processor 内訳からの仮説に過ぎず、同一 crate 版での再計測や品質突合はしていない。改善の公式説明ではなく、後で読む人向けの **参考情報**。
+
+アプリ側の encode 既定 (VP9 `cpu_used: 9` / `deadline: realtime` / `threads: 1`、AV1 `enc_mode: 13`) や `thread-count 1` の scheduler 設計は hisui 2025.3.3 と大きくは違わなさそうに見える。差の **候補** のひとつはネイティブコーデック / ラッパーの世代差。
+
+| 依存 | hisui 2025.3.3 | SAC (計測時点) | 内蔵 upstream の差 (ラッパー metadata) |
+|---|---|---|---|
+| `shiguredo_libvpx` | 2025.1.0 | 2026.2.0-canary.1 | libvpx v1.15.2 → v1.16.0 |
+| `shiguredo_svt_av1` | 2025.1.0 | 2026.2.0 | SVT-AV1 v3.1.2 → v4.2.0 |
+| `shiguredo_dav1d` | 2025.1.0 | 2026.2.0 | (付帯) |
+| `shiguredo_mp4` / `libyuv` / `video_toolbox` | 2025.x | 2026.x | 版差あり |
+
+- VP9 の decode/encode 短縮や AV1 encode の大幅短縮は、上記世代差と **方向が一致する** 程度の観察。因果は未検証。
+- mixer がほぼ同等な点も、「アプリ再設計より codec 実体」仮説と矛盾しない、という以上ではない。
+- VT 経路はラッパー変更で `total_processing_seconds` の帰属がずれうる (encode 積算が長くても壁時計が短い、など)。指標差と実コストは分けて見る。
+- 未確認のまま残すもの: 同一 crate 版に揃えた再計測、出力品質・フレーム数の突合、Linux。
 
 ### 再現手順
 
