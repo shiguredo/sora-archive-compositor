@@ -173,6 +173,8 @@ impl MediaProcessor for VideoDecoder {
             self.inner.finish()?;
         };
 
+        // next_* が途中で Err になると、ここに積んだフレームは process_output 前に
+        // タスク破棄され下流へ出ない。total_output_* は delivered 数ではない。
         while let Some(frame) = self.inner.next_decoded_frame()? {
             self.stats.total_output_video_frame_count.add(1);
             self.stats.resolutions.insert(VideoResolution::new(&frame));
