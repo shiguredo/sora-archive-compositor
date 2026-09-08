@@ -13,7 +13,7 @@
 ## テストでの使い方
 
 - 実データは各 `.json`（タイムスタンプ等）と `layout-trim-true.json` / `layout-trim-false.json` にある
-- `tests/layout_test.rs` の `trim` は JSON 由来の時刻と trim 判定だけを検証する
+- `tests/test_layout.rs` の `trim` は JSON 由来の時刻と trim 判定だけを検証する
 - `.webm` 本体を読むテストを足すと、すぐ失敗する
 
 ## 注意

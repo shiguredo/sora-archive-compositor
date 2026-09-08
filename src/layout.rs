@@ -726,7 +726,7 @@ impl Default for AggregatedSourceInfo {
     }
 }
 
-// 非公開構造体のテストは layout_test.rs ではなくこっちでやる
+// 非公開構造体のテストは test_layout.rs ではなくこっちでやる
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -755,7 +755,7 @@ mod tests {
     }
 
     #[test]
-    fn test_duplicate_region_name() -> crate::Result<()> {
+    fn duplicate_region_name() -> crate::Result<()> {
         let json = include_str!("../testdata/layouts/error-layout-duplicate-region-name.json");
         let e = json
             .parse::<nojson::Json<RawLayout>>()
@@ -767,7 +767,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_overlapping_sources_no_overlap() -> crate::Result<()> {
+    fn merge_overlapping_sources_no_overlap() -> crate::Result<()> {
         let mut aggregated = create_test_aggregated_source_info();
 
         // 重複しないソースを追加
@@ -788,7 +788,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_overlapping_sources_complete_containment() -> crate::Result<()> {
+    fn merge_overlapping_sources_complete_containment() -> crate::Result<()> {
         let mut aggregated = create_test_aggregated_source_info();
 
         // 一方が他方を完全に含むソースを追加
@@ -810,7 +810,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_overlapping_sources_empty() -> crate::Result<()> {
+    fn merge_overlapping_sources_empty() -> crate::Result<()> {
         let mut aggregated = create_test_aggregated_source_info();
 
         aggregated.merge_overlapping_sources()?;
@@ -824,7 +824,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_overlapping_sources_partial_overlap() -> crate::Result<()> {
+    fn merge_overlapping_sources_partial_overlap() -> crate::Result<()> {
         let mut aggregated = create_test_aggregated_source_info();
 
         // 部分的に重複するソースを追加
@@ -852,7 +852,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_overlapping_sources_identical_duration() -> crate::Result<()> {
+    fn merge_overlapping_sources_identical_duration() -> crate::Result<()> {
         let mut aggregated = create_test_aggregated_source_info();
 
         // 同じ長さだが異なる開始時刻のソースを追加
@@ -878,7 +878,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_overlapping_sources_multiple_overlaps() -> crate::Result<()> {
+    fn merge_overlapping_sources_multiple_overlaps() -> crate::Result<()> {
         let mut aggregated = create_test_aggregated_source_info();
 
         // 様々な重複パターンを持つ複数のソースを追加
@@ -915,7 +915,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_overlapping_sources_different_durations_same_start() -> crate::Result<()> {
+    fn merge_overlapping_sources_different_durations_same_start() -> crate::Result<()> {
         let mut aggregated = create_test_aggregated_source_info();
 
         // 同じ開始時刻で異なる長さのソースを追加
@@ -937,7 +937,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_overlapping_sources_sequential() -> crate::Result<()> {
+    fn merge_overlapping_sources_sequential() -> crate::Result<()> {
         let mut aggregated = create_test_aggregated_source_info();
 
         // 連続するが重複しないソースを追加

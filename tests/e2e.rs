@@ -126,7 +126,7 @@ fn empty_source() -> noargs::Result<()> {
 }
 
 // 共通のテスト関数
-fn test_simple_single_source_common(
+fn simple_single_source_common(
     test_data_dir: &str,
     expected_video_codec: CodecName,
     expected_video_engine: Option<EngineName>,
@@ -416,7 +416,7 @@ fn check_mp4_writer_audio_codec(
 ///   - VP9, OPUS, 25 fps, 320x240
 #[test]
 fn simple_single_source_vp9() -> noargs::Result<()> {
-    test_simple_single_source_common(
+    simple_single_source_common(
         "testdata/e2e/simple_single_source_vp9/",
         CodecName::Vp9,
         Some(EngineName::Libvpx),
@@ -429,7 +429,7 @@ fn simple_single_source_vp9() -> noargs::Result<()> {
 #[test]
 #[cfg(feature = "nvcodec")]
 fn simple_single_source_vp9_nvcodec() -> noargs::Result<()> {
-    test_simple_single_source_common(
+    simple_single_source_common(
         "testdata/e2e/simple_single_source_vp9_nvcodec/",
         CodecName::H264,
         Some(EngineName::Nvcodec),
@@ -441,7 +441,7 @@ fn simple_single_source_vp9_nvcodec() -> noargs::Result<()> {
 #[test]
 #[cfg(any(feature = "fdk-aac", target_os = "macos"))]
 fn simple_single_source_aac_encode() -> noargs::Result<()> {
-    test_simple_single_source_common(
+    simple_single_source_common(
         "testdata/e2e/simple_single_source_aac_encode/",
         CodecName::Av1,
         None,
@@ -464,7 +464,7 @@ fn simple_single_source_aac_encode() -> noargs::Result<()> {
 #[test]
 #[cfg(any(feature = "nvcodec", target_os = "macos"))]
 fn simple_single_source_h265() -> noargs::Result<()> {
-    test_simple_single_source_common(
+    simple_single_source_common(
         "testdata/e2e/simple_single_source_h265/",
         CodecName::H265,
         None,
@@ -487,7 +487,7 @@ fn simple_single_source_h265() -> noargs::Result<()> {
 #[test]
 #[cfg(any(feature = "nvcodec", target_os = "macos"))]
 fn simple_single_source_h264() -> noargs::Result<()> {
-    test_simple_single_source_common(
+    simple_single_source_common(
         "testdata/e2e/simple_single_source_h264/",
         CodecName::H264,
         None,
@@ -509,7 +509,7 @@ fn simple_single_source_h264() -> noargs::Result<()> {
 ///   - VP9, OPUS, 25 fps, 320x240
 #[test]
 fn simple_single_source_av1() -> noargs::Result<()> {
-    test_simple_single_source_common(
+    simple_single_source_common(
         "testdata/e2e/simple_single_source_av1/",
         CodecName::Av1,
         None,

@@ -4,7 +4,7 @@ use sora_archive_compositor::{
 };
 
 #[test]
-fn webm_audio_reader_test() -> sora_archive_compositor::Result<()> {
+fn webm_audio_reader() -> sora_archive_compositor::Result<()> {
     let reader = WebmAudioReader::new(
         SourceId::new("dummy"),
         "testdata/archive-black-silent.webm",
@@ -17,7 +17,7 @@ fn webm_audio_reader_test() -> sora_archive_compositor::Result<()> {
 }
 
 #[test]
-fn webm_video_reader_test() -> sora_archive_compositor::Result<()> {
+fn webm_video_reader() -> sora_archive_compositor::Result<()> {
     let reader = WebmVideoReader::new(
         SourceId::new("dummy"),
         "testdata/archive-black-silent.webm",

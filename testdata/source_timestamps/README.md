@@ -13,7 +13,7 @@
 ## テストでの使い方
 
 - 実データは各 `.json`（タイムスタンプ等）と `layout.json` / `split-layout.json` にある
-- `tests/layout_test.rs` の `source_timestamps` は JSON 由来の開始 / 終了時刻だけを検証する
+- `tests/test_layout.rs` の `source_timestamps` は JSON 由来の開始 / 終了時刻だけを検証する
 - `.webm` 本体を読むテストを足すと、すぐ失敗する
 
 ## 注意

@@ -40,7 +40,7 @@ fn h264_multi_resolutions() -> sora_archive_compositor::Result<()> {
         "testdata/archive-red-320x320-h264.mp4",
         Default::default(),
     )?;
-    multi_resolutions_test(reader0, reader1)?;
+    multi_resolutions(reader0, reader1)?;
     Ok(())
 }
 
@@ -59,7 +59,7 @@ fn h265_multi_resolutions() -> sora_archive_compositor::Result<()> {
         "testdata/archive-red-320x320-h265.mp4",
         Default::default(),
     )?;
-    multi_resolutions_test(reader0, reader1)?;
+    multi_resolutions(reader0, reader1)?;
     Ok(())
 }
 
@@ -77,7 +77,7 @@ fn vp9_multi_resolutions() -> sora_archive_compositor::Result<()> {
         "testdata/archive-red-320x320-vp9.mp4",
         Default::default(),
     )?;
-    multi_resolutions_test(reader0, reader1)?;
+    multi_resolutions(reader0, reader1)?;
     Ok(())
 }
 
@@ -95,11 +95,11 @@ fn av1_multi_resolutions() -> sora_archive_compositor::Result<()> {
         "testdata/archive-red-320x320-av1.mp4",
         Default::default(),
     )?;
-    multi_resolutions_test(reader0, reader1)?;
+    multi_resolutions(reader0, reader1)?;
     Ok(())
 }
 
-fn multi_resolutions_test<I>(reader0: I, reader1: I) -> sora_archive_compositor::Result<()>
+fn multi_resolutions<I>(reader0: I, reader1: I) -> sora_archive_compositor::Result<()>
 where
     I: Iterator<Item = sora_archive_compositor::Result<VideoFrame>>,
 {
@@ -204,7 +204,7 @@ fn prepend_h264_sps_pps(mut frame: VideoFrame) -> MediaProcessorInput {
 #[test]
 #[cfg(feature = "nvcodec")]
 fn h264_single_track_resolution_change_nvcodec() -> sora_archive_compositor::Result<()> {
-    single_track_resolution_change_nvcodec_test(
+    single_track_resolution_change_nvcodec(
         "testdata/archive-h264-resolution-change.mp4",
         CodecName::H264,
     )
@@ -214,14 +214,14 @@ fn h264_single_track_resolution_change_nvcodec() -> sora_archive_compositor::Res
 #[test]
 #[cfg(feature = "nvcodec")]
 fn h265_single_track_resolution_change_nvcodec() -> sora_archive_compositor::Result<()> {
-    single_track_resolution_change_nvcodec_test(
+    single_track_resolution_change_nvcodec(
         "testdata/archive-h265-resolution-change.mp4",
         CodecName::H265,
     )
 }
 
 #[cfg(feature = "nvcodec")]
-fn single_track_resolution_change_nvcodec_test(
+fn single_track_resolution_change_nvcodec(
     path: &str,
     codec: CodecName,
 ) -> sora_archive_compositor::Result<()> {

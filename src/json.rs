@@ -439,7 +439,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_single_line_malformed_json() {
+    fn parse_single_line_malformed_json() {
         let malformed_json = r#"{"key": "value", "another": 123"#; // 閉じカッコがない
 
         let error = parse_str::<()>(malformed_json).expect_err("bug");
@@ -456,7 +456,7 @@ BACKTRACE:"#;
     }
 
     #[test]
-    fn test_parse_multiline_malformed_json() {
+    fn parse_multiline_malformed_json() {
         // "another" の値の後ろにカンマがない
         let malformed_json = r#"{
         "key": "value",
@@ -479,7 +479,7 @@ BACKTRACE:"#;
     }
 
     #[test]
-    fn test_parse_long_single_line_malfomed_json() {
+    fn parse_long_single_line_malfomed_json() {
         // 200 文字を超える長い行で JSON が不正なケース
         let long_value = "a".repeat(150);
         let invalid_json = format!(
@@ -502,7 +502,7 @@ BACKTRACE:"#;
     }
 
     #[test]
-    fn test_parse_long_multiline_malformed_json() {
+    fn parse_long_multiline_malformed_json() {
         // 複数行で長い行を含む JSON が不正なケース
         let long_value = "a".repeat(100);
         let invalid_json = format!(
@@ -529,7 +529,7 @@ BACKTRACE:"#;
     }
 
     #[test]
-    fn test_parse_invalid_json() {
+    fn parse_invalid_json() {
         // 文法的には正しいけど値が不正な JSON
         let invalid_json = r#""not_a_number""#;
 
