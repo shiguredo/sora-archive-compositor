@@ -45,7 +45,7 @@ pub mod media;
 pub mod metadata;
 pub mod mixer_audio;
 pub mod mixer_video;
-pub(crate) mod output_queue;
+pub mod output_queue;
 pub mod tune;
 pub mod tune_nsga2;
 pub mod tune_rng;

@@ -15,7 +15,7 @@ use std::collections::VecDeque;
 /// - 相手が既にエラーを `pop` 済みのキューを `append_from` した場合は、
 ///   エラー無しで終端し、以降の `pop` は `Ok(None)` のみになる
 #[derive(Debug)]
-pub(crate) struct OutputQueue<T> {
+pub struct OutputQueue<T> {
     ok: VecDeque<T>,
     /// まだ `pop` していない終端エラー
     pending_error: Option<crate::Error>,
@@ -34,7 +34,7 @@ impl<T> Default for OutputQueue<T> {
 }
 
 impl<T> OutputQueue<T> {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
 
@@ -44,7 +44,7 @@ impl<T> OutputQueue<T> {
     }
 
     /// 成功結果を積む。終端後は捨てる。
-    pub(crate) fn push_ok(&mut self, item: T) {
+    pub fn push_ok(&mut self, item: T) {
         if self.is_terminated() {
             return;
         }
@@ -52,7 +52,7 @@ impl<T> OutputQueue<T> {
     }
 
     /// エラーで終端する。既に終端していれば無視する。
-    pub(crate) fn push_err(&mut self, err: crate::Error) {
+    pub fn push_err(&mut self, err: crate::Error) {
         if self.is_terminated() {
             return;
         }
@@ -60,7 +60,7 @@ impl<T> OutputQueue<T> {
     }
 
     /// 成功を 1 件取り出す。尽きていれば未配信エラーを 1 回だけ `Err` で返す。
-    pub(crate) fn pop(&mut self) -> crate::Result<Option<T>> {
+    pub fn pop(&mut self) -> crate::Result<Option<T>> {
         if let Some(item) = self.ok.pop_front() {
             return Ok(Some(item));
         }
@@ -76,7 +76,7 @@ impl<T> OutputQueue<T> {
     /// 自身が既に終端していれば相手の内容は捨てる。
     /// 相手に未配信の終端エラーがあれば、自身の成功の後ろにそのエラーを引き継ぐ。
     /// 相手がエラー配信済みだけで未配信エラーが無い場合は、自身もエラー無しで終端する。
-    pub(crate) fn append_from(&mut self, other: &mut Self) {
+    pub fn append_from(&mut self, other: &mut Self) {
         if self.is_terminated() {
             other.ok.clear();
             other.pending_error = None;
