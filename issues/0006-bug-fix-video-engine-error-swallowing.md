@@ -1,7 +1,7 @@
 # VideoToolbox / NVCODEC のエンコード・デコードエラーが握り潰され、壊れた出力が success 扱いになる
 
 - Created: 2026-08-04
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-08
 - Branch: feature/fix-video-engine-error-swallowing
 - Polished: 2026-08-20
 
@@ -47,3 +47,12 @@ VideoToolbox / NVCODEC はコールバックで結果を積む。4 エンジン�
 - エラーは最初の 1 件で終端し、リストに溜めない
 - 正常系の動作が従来と変わらない
 - 出力ファイルの削除は求めない（残骸 MP4 残置は許容済み）
+
+## 解決方法
+
+コールバック結果キューを `src/output_queue.rs` の `OutputQueue<T>` に集約し、fail-fast 契約で最初のエラー 1 件だけを保持するようにした。
+
+- VideoToolbox / NVCODEC の 4 エンジンから重複キューを削除し、`OutputQueue` を使うように置き換えた
+- `next_encoded_frame` / `next_decoded_frame` を `Result` 化し、`VideoEncoder` / `VideoDecoder` の `process_input` が `Err` を返すようにした
+- 既存の `TaskRunner` → 集約 `Stats.error` → `ComposeResult.success` 経路で合成失敗になることを、スケジューラ結合テストと VideoToolbox の壊れた入力テストで固定した
+- `OutputQueue` は `pub(crate)` とし、`append_from` の終端継承契約も単体テストで固定した
