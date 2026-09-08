@@ -410,7 +410,7 @@ impl MediaProcessor for VideoEncoder {
             self.inner.finish()?;
         }
 
-        while let Some(encoded) = self.inner.next_encoded_frame() {
+        while let Some(encoded) = self.inner.next_encoded_frame()? {
             self.stats.total_output_video_frame_count.add(1);
             self.encoded.push_back(encoded);
         }
@@ -521,11 +521,11 @@ impl VideoEncoderInner {
         }
     }
 
-    fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
+    fn next_encoded_frame(&mut self) -> crate::Result<Option<VideoFrame>> {
         match self {
-            Self::Libvpx(encoder) => encoder.next_encoded_frame(),
-            Self::Openh264(encoder) => encoder.next_encoded_frame(),
-            Self::SvtAv1(encoder) => encoder.next_encoded_frame(),
+            Self::Libvpx(encoder) => Ok(encoder.next_encoded_frame()),
+            Self::Openh264(encoder) => Ok(encoder.next_encoded_frame()),
+            Self::SvtAv1(encoder) => Ok(encoder.next_encoded_frame()),
             #[cfg(target_os = "macos")]
             Self::VideoToolbox(encoder) => encoder.next_encoded_frame(),
             #[cfg(feature = "nvcodec")]

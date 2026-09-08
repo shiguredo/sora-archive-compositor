@@ -1,10 +1,10 @@
-use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::{
     encoder::VideoEncoderOptions,
+    output_queue::OutputQueue,
     types::{CodecName, EvenUsize},
     video::{FrameRate, VideoFormat, VideoFrame},
     video_h264, video_h265,
@@ -13,13 +13,6 @@ use crate::{
 /// callback スレッドから呼ばれる Handler をラップした型
 type VideoToolboxEncodeHandler =
     shiguredo_video_toolbox::FnEncodeHandler<VideoFrame, shiguredo_video_toolbox::Error>;
-
-/// エンコード結果を積むキュー
-#[derive(Debug, Default)]
-struct EncodeOutputQueue {
-    ok_frames: VecDeque<EncodedFrameWithMeta>,
-    errors: VecDeque<crate::Error>,
-}
 
 #[derive(Debug)]
 struct EncodedFrameWithMeta {
@@ -42,7 +35,7 @@ struct SampleEntrySlot {
 // 2026.2.0-canary.2 の Encoder は Debug を実装していないため、手動で Debug を実装する
 pub struct VideoToolboxEncoder {
     inner: shiguredo_video_toolbox::Encoder<VideoToolboxEncodeHandler>,
-    output_queue: Arc<Mutex<EncodeOutputQueue>>,
+    output_queue: Arc<Mutex<OutputQueue<EncodedFrameWithMeta>>>,
     sample_entry: Arc<Mutex<SampleEntrySlot>>,
     width: EvenUsize,
     height: EvenUsize,
@@ -100,7 +93,8 @@ impl VideoToolboxEncoder {
         format: VideoFormat,
         fps: FrameRate,
     ) -> crate::Result<Self> {
-        let output_queue: Arc<Mutex<EncodeOutputQueue>> = Arc::new(Mutex::new(Default::default()));
+        let output_queue: Arc<Mutex<OutputQueue<EncodedFrameWithMeta>>> =
+            Arc::new(Mutex::new(OutputQueue::new()));
         let sample_entry: Arc<Mutex<SampleEntrySlot>> = Arc::new(Mutex::new(Default::default()));
         let handler_queue = output_queue.clone();
         let handler_sample_entry = sample_entry.clone();
@@ -169,13 +163,14 @@ impl VideoToolboxEncoder {
         Ok(())
     }
 
-    pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
-        let mut queue = self.output_queue.lock().expect("output queue is poisoned");
-        // エラーは呼び出し側では取り出せないので、ここではとりあえずログに出しつつ捨てる
-        while let Some(err) = queue.errors.pop_front() {
-            tracing::error!("video toolbox encode error: {}", err.display());
-        }
-        let encoded = queue.ok_frames.pop_front()?;
+    pub fn next_encoded_frame(&mut self) -> crate::Result<Option<VideoFrame>> {
+        let encoded = {
+            let mut queue = self.output_queue.lock().expect("output queue is poisoned");
+            match queue.pop()? {
+                Some(encoded) => encoded,
+                None => return Ok(None),
+            }
+        };
         // 最初の出力フレームにだけ sample_entry を載せる。take() で entry が空になっても、
         // コールバック側は taken フラグで再設定しない (SampleEntrySlot 参照)
         let sample_entry = {
@@ -184,7 +179,7 @@ impl VideoToolboxEncoder {
             slot.taken = true;
             entry
         };
-        Some(VideoFrame {
+        Ok(Some(VideoFrame {
             source_id: encoded.input_frame.source_id.clone(),
             data: encoded.data,
             format: self.format,
@@ -194,13 +189,13 @@ impl VideoToolboxEncoder {
             timestamp: encoded.input_frame.timestamp,
             duration: encoded.input_frame.duration,
             sample_entry,
-        })
+        }))
     }
 }
 
 /// callback スレッドから呼ばれるコールバック本体
 fn handle_encode_callback(
-    output_queue: &Mutex<EncodeOutputQueue>,
+    output_queue: &Mutex<OutputQueue<EncodedFrameWithMeta>>,
     sample_entry_slot: &Mutex<SampleEntrySlot>,
     width: EvenUsize,
     height: EvenUsize,
@@ -240,8 +235,7 @@ fn handle_encode_callback(
                         output_queue
                             .lock()
                             .expect("output queue is poisoned")
-                            .errors
-                            .push_back(e);
+                            .push_err(e);
                         return;
                     }
                 }
@@ -250,8 +244,7 @@ fn handle_encode_callback(
             output_queue
                 .lock()
                 .expect("output queue is poisoned")
-                .ok_frames
-                .push_back(EncodedFrameWithMeta {
+                .push_ok(EncodedFrameWithMeta {
                     data: encoded_frame.data,
                     keyframe: encoded_frame.keyframe,
                     input_frame: encoded_frame.user_data,
@@ -261,8 +254,7 @@ fn handle_encode_callback(
             output_queue
                 .lock()
                 .expect("output queue is poisoned")
-                .errors
-                .push_back(crate::Error::new(format!(
+                .push_err(crate::Error::new(format!(
                     "video toolbox encode error: {err}"
                 )));
         }

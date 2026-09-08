@@ -1,9 +1,9 @@
-use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use shiguredo_mp4::boxes::{Avc1Box, AvccBox, SampleEntry};
 
 use crate::{
+    output_queue::OutputQueue,
     video::{VideoFormat, VideoFrame},
     video_h264::{
         self, H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS, H264AnnexBNalUnits, NALU_HEADER_LENGTH,
@@ -15,17 +15,12 @@ use crate::{
 type VideoToolboxDecodeHandler =
     shiguredo_video_toolbox::FnDecodeHandler<VideoFrame, shiguredo_video_toolbox::Error>;
 
-/// デコード結果を積むキュー
-#[derive(Debug, Default)]
-struct DecodeOutputQueue {
-    ok_frames: VecDeque<VideoFrame>,
-    errors: VecDeque<crate::Error>,
-}
+type VideoToolboxDecodeQueue = Arc<Mutex<OutputQueue<VideoFrame>>>;
 
 // 2026.2.0-canary.2 の Decoder は Debug を実装していないため、手動で Debug を実装する
 pub struct VideoToolboxDecoder {
     inner: shiguredo_video_toolbox::Decoder<VideoToolboxDecodeHandler>,
-    output_queue: Arc<Mutex<DecodeOutputQueue>>,
+    output_queue: VideoToolboxDecodeQueue,
 
     // デコーダーの再初期化が必要かどうかの判定に使うフィールド
     vps: Vec<u8>,
@@ -97,9 +92,9 @@ impl VideoToolboxDecoder {
         config: shiguredo_video_toolbox::DecoderConfig<'_>,
     ) -> crate::Result<(
         shiguredo_video_toolbox::Decoder<VideoToolboxDecodeHandler>,
-        Arc<Mutex<DecodeOutputQueue>>,
+        VideoToolboxDecodeQueue,
     )> {
-        let output_queue: Arc<Mutex<DecodeOutputQueue>> = Arc::new(Mutex::new(Default::default()));
+        let output_queue: VideoToolboxDecodeQueue = Arc::new(Mutex::new(OutputQueue::new()));
         let handler_queue = output_queue.clone();
         let handler = shiguredo_video_toolbox::FnDecodeHandler::new(move |result| {
             handle_decode_callback(&handler_queue, result);
@@ -156,8 +151,7 @@ impl VideoToolboxDecoder {
                 .lock()
                 .expect("output queue is poisoned");
             let mut old_queue = old_queue.lock().expect("output queue is poisoned");
-            new_queue.ok_frames.append(&mut old_queue.ok_frames);
-            new_queue.errors.append(&mut old_queue.errors);
+            new_queue.append_from(&mut old_queue);
         }
         *self = new_decoder;
         Ok(())
@@ -194,19 +188,15 @@ impl VideoToolboxDecoder {
         Ok(())
     }
 
-    pub fn next_decoded_frame(&mut self) -> Option<VideoFrame> {
+    pub fn next_decoded_frame(&mut self) -> crate::Result<Option<VideoFrame>> {
         let mut queue = self.output_queue.lock().expect("output queue is poisoned");
-        // エラーは呼び出し側では取り出せないので、ここではとりあえずログに出しつつ捨てる
-        while let Some(err) = queue.errors.pop_front() {
-            tracing::error!("video toolbox decode error: {}", err.display());
-        }
-        queue.ok_frames.pop_front()
+        queue.pop()
     }
 }
 
 /// callback スレッドから呼ばれるコールバック本体
 fn handle_decode_callback(
-    output_queue: &Mutex<DecodeOutputQueue>,
+    output_queue: &Mutex<OutputQueue<VideoFrame>>,
     result: std::result::Result<
         shiguredo_video_toolbox::DecodedFrame<VideoFrame>,
         shiguredo_video_toolbox::Error,
@@ -220,8 +210,7 @@ fn handle_decode_callback(
                 output_queue
                     .lock()
                     .expect("output queue is poisoned")
-                    .errors
-                    .push_back(crate::Error::new(
+                    .push_err(crate::Error::new(
                         "unexpected Nv12 decoded frame: decoder is configured for I420 output",
                     ));
                 return;
@@ -243,15 +232,13 @@ fn handle_decode_callback(
                     output_queue
                         .lock()
                         .expect("output queue is poisoned")
-                        .ok_frames
-                        .push_back(i420);
+                        .push_ok(i420);
                 }
                 Err(e) => {
                     output_queue
                         .lock()
                         .expect("output queue is poisoned")
-                        .errors
-                        .push_back(e);
+                        .push_err(e);
                 }
             }
         }
@@ -259,8 +246,7 @@ fn handle_decode_callback(
             output_queue
                 .lock()
                 .expect("output queue is poisoned")
-                .errors
-                .push_back(crate::Error::new(format!(
+                .push_err(crate::Error::new(format!(
                     "video toolbox decode error: {err}"
                 )));
         }

@@ -1,20 +1,13 @@
 use std::borrow::Cow;
-use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use crate::layout_decode_params::LayoutDecodeParams;
+use crate::output_queue::OutputQueue;
 use crate::video::{VideoFormat, VideoFrame};
 use crate::video_h264::{self, H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS};
 use crate::video_h265::{
     self, H265_NALU_TYPE_PPS, H265_NALU_TYPE_SPS, H265_NALU_TYPE_VPS, NALU_HEADER_LENGTH,
 };
-
-/// callback スレッドからデコード結果を受け取るキュー
-#[derive(Debug, Default)]
-struct DecodeOutputQueue {
-    ok_frames: VecDeque<DecodedFrameWithMeta>,
-    errors: VecDeque<crate::Error>,
-}
 
 /// callback で受け取ったフレームと、user_data として渡した入力側メタデータ
 #[derive(Debug)]
@@ -34,7 +27,7 @@ type NvcodecDecodeHandler =
 #[derive(Debug)]
 pub struct NvcodecDecoder {
     inner: shiguredo_nvcodec::Decoder<NvcodecDecodeHandler>,
-    output_queue: Arc<Mutex<DecodeOutputQueue>>,
+    output_queue: Arc<Mutex<OutputQueue<DecodedFrameWithMeta>>>,
     parameter_sets: Option<Vec<u8>>, // VPS/SPS/PPS をキャッシュ
 }
 
@@ -65,7 +58,8 @@ impl NvcodecDecoder {
     }
 
     fn new_common(config: shiguredo_nvcodec::DecoderConfig) -> crate::Result<Self> {
-        let output_queue: Arc<Mutex<DecodeOutputQueue>> = Arc::new(Mutex::new(Default::default()));
+        let output_queue: Arc<Mutex<OutputQueue<DecodedFrameWithMeta>>> =
+            Arc::new(Mutex::new(OutputQueue::new()));
         let handler_queue = output_queue.clone();
         let handler = shiguredo_nvcodec::FnDecodeHandler::new(move |result| {
             handle_decode_callback(&handler_queue, result);
@@ -145,13 +139,13 @@ impl NvcodecDecoder {
         Ok(())
     }
 
-    pub fn next_decoded_frame(&mut self) -> Option<VideoFrame> {
+    pub fn next_decoded_frame(&mut self) -> crate::Result<Option<VideoFrame>> {
         let decoded = {
             let mut queue = self.output_queue.lock().expect("output queue is poisoned");
-            while let Some(err) = queue.errors.pop_front() {
-                tracing::error!("nvcodec decode error: {}", err.display());
+            match queue.pop()? {
+                Some(decoded) => decoded,
+                None => return Ok(None),
             }
-            queue.ok_frames.pop_front()?
         };
 
         // NV12 から I420 への変換
@@ -189,11 +183,12 @@ impl NvcodecDecoder {
 
         let size = shiguredo_libyuv::ImageSize::new(width, height);
         if let Err(e) = shiguredo_libyuv::nv12_to_i420(&src, &mut dst, size) {
-            tracing::error!("libyuv nv12_to_i420 failed: {e}");
-            return None;
+            return Err(crate::Error::new(format!(
+                "libyuv nv12_to_i420 failed: {e}"
+            )));
         }
 
-        match VideoFrame::new_i420(
+        VideoFrame::new_i420(
             decoded.input_frame,
             width,
             height,
@@ -203,19 +198,14 @@ impl NvcodecDecoder {
             width,
             uv_width,
             uv_width,
-        ) {
-            Ok(frame) => Some(frame),
-            Err(e) => {
-                tracing::error!("failed to assemble I420 frame: {}", e.display());
-                None
-            }
-        }
+        )
+        .map(Some)
     }
 }
 
 /// callback スレッドから呼ばれるコールバック本体
 fn handle_decode_callback(
-    output_queue: &Mutex<DecodeOutputQueue>,
+    output_queue: &Mutex<OutputQueue<DecodedFrameWithMeta>>,
     result: std::result::Result<
         shiguredo_nvcodec::DecodedFrame<VideoFrame>,
         shiguredo_nvcodec::Error,
@@ -231,8 +221,7 @@ fn handle_decode_callback(
             output_queue
                 .lock()
                 .expect("output queue is poisoned")
-                .ok_frames
-                .push_back(DecodedFrameWithMeta {
+                .push_ok(DecodedFrameWithMeta {
                     width,
                     height,
                     nv12_data,
@@ -245,8 +234,7 @@ fn handle_decode_callback(
             output_queue
                 .lock()
                 .expect("output queue is poisoned")
-                .errors
-                .push_back(crate::Error::new(format!("nvcodec decode error: {err}")));
+                .push_err(crate::Error::new(format!("nvcodec decode error: {err}")));
         }
     }
 }

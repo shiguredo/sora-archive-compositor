@@ -1,25 +1,14 @@
-use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::{
     encoder::VideoEncoderOptions,
+    output_queue::OutputQueue,
     types::CodecName,
     video::{VideoFormat, VideoFrame},
     video_av1, video_h264, video_h265,
 };
-
-/// エンコード結果 (成功したフレーム or エラー) を受け取るためのキュー。
-///
-/// 2026.2.0 系の `shiguredo_nvcodec::Encoder` はコールバックベース API になったため、
-/// callback スレッドから同期的に取り出し可能なキューへ結果を蓄積する。
-/// エラーは次回 `next_encoded_frame()` 呼び出し時に取り出せるように末尾に積む。
-#[derive(Debug, Default)]
-struct EncodeOutputQueue {
-    ok_frames: VecDeque<EncodedFrameWithMeta>,
-    errors: VecDeque<crate::Error>,
-}
 
 /// callback で受け取った圧縮フレームと、user_data として渡した入力側メタデータ
 #[derive(Debug)]
@@ -51,7 +40,7 @@ type NvcodecHandler = shiguredo_nvcodec::FnEncodeHandler<VideoFrame, shiguredo_n
 #[derive(Debug)]
 pub struct NvcodecEncoder {
     inner: shiguredo_nvcodec::Encoder<NvcodecHandler>,
-    output_queue: Arc<Mutex<EncodeOutputQueue>>,
+    output_queue: Arc<Mutex<OutputQueue<EncodedFrameWithMeta>>>,
     encoded_format: VideoFormat,
     /// 最初の出力フレームに sample_entry を載せるために保持する。
     /// callback 側と共有するため Arc<Mutex<Option<...>>> で表現し、一度 take() したら以降は None のまま
@@ -149,7 +138,8 @@ impl NvcodecEncoder {
         make_context: impl FnOnce(Vec<u8>) -> crate::Result<HandlerContext>,
     ) -> crate::Result<Self> {
         let context_slot: HandlerContextSlot = Arc::new(OnceLock::new());
-        let output_queue: Arc<Mutex<EncodeOutputQueue>> = Arc::new(Mutex::new(Default::default()));
+        let output_queue: Arc<Mutex<OutputQueue<EncodedFrameWithMeta>>> =
+            Arc::new(Mutex::new(OutputQueue::new()));
 
         let handler = build_handler(output_queue.clone(), context_slot.clone());
         let inner = shiguredo_nvcodec::Encoder::new(config, handler)?;
@@ -261,16 +251,15 @@ impl NvcodecEncoder {
         Ok(())
     }
 
-    pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
-        let mut queue = self.output_queue.lock().expect("output queue is poisoned");
-        // エラーは呼び出し側では取り出せないので、ここではとりあえずログに出しつつ捨てる。
-        // (Result を返す next_encoded_frame_result() を用意することも検討したが、
-        //  他の encoder との interface 一致を優先している)
-        while let Some(err) = queue.errors.pop_front() {
-            tracing::error!("nvcodec encode error: {}", err.display());
-        }
-        let encoded = queue.ok_frames.pop_front()?;
-        Some(VideoFrame {
+    pub fn next_encoded_frame(&mut self) -> crate::Result<Option<VideoFrame>> {
+        let encoded = {
+            let mut queue = self.output_queue.lock().expect("output queue is poisoned");
+            match queue.pop()? {
+                Some(encoded) => encoded,
+                None => return Ok(None),
+            }
+        };
+        Ok(Some(VideoFrame {
             source_id: encoded.input_frame.source_id.clone(),
             data: encoded.data,
             format: self.encoded_format,
@@ -284,7 +273,7 @@ impl NvcodecEncoder {
                 .lock()
                 .expect("sample entry is poisoned")
                 .take(),
-        })
+        }))
     }
 
     pub fn codec(&self) -> CodecName {
@@ -294,7 +283,7 @@ impl NvcodecEncoder {
 
 /// shiguredo_nvcodec::Encoder が消費する handler を構築する
 fn build_handler(
-    output_queue: Arc<Mutex<EncodeOutputQueue>>,
+    output_queue: Arc<Mutex<OutputQueue<EncodedFrameWithMeta>>>,
     context_slot: HandlerContextSlot,
 ) -> NvcodecHandler {
     shiguredo_nvcodec::FnEncodeHandler::new(move |result| {
@@ -304,7 +293,7 @@ fn build_handler(
 
 /// callback スレッドから呼ばれるコールバック本体
 fn handle_encode_callback(
-    output_queue: &Mutex<EncodeOutputQueue>,
+    output_queue: &Mutex<OutputQueue<EncodedFrameWithMeta>>,
     context_slot: &OnceLock<HandlerContext>,
     result: std::result::Result<
         shiguredo_nvcodec::EncodedFrame<VideoFrame>,
@@ -328,16 +317,14 @@ fn handle_encode_callback(
                         output_queue
                             .lock()
                             .expect("output queue is poisoned")
-                            .errors
-                            .push_back(e);
+                            .push_err(e);
                         return;
                     }
                 };
             output_queue
                 .lock()
                 .expect("output queue is poisoned")
-                .ok_frames
-                .push_back(EncodedFrameWithMeta {
+                .push_ok(EncodedFrameWithMeta {
                     data: frame_data,
                     keyframe,
                     input_frame,
@@ -347,8 +334,7 @@ fn handle_encode_callback(
             output_queue
                 .lock()
                 .expect("output queue is poisoned")
-                .errors
-                .push_back(crate::Error::new(format!("nvcodec encode error: {err}")));
+                .push_err(crate::Error::new(format!("nvcodec encode error: {err}")));
         }
     }
 }

@@ -173,7 +173,7 @@ impl MediaProcessor for VideoDecoder {
             self.inner.finish()?;
         };
 
-        while let Some(frame) = self.inner.next_decoded_frame() {
+        while let Some(frame) = self.inner.next_decoded_frame()? {
             self.stats.total_output_video_frame_count.add(1);
             self.stats.resolutions.insert(VideoResolution::new(&frame));
             self.decoded.push_back(frame);
@@ -335,12 +335,12 @@ impl VideoDecoderInner {
         Ok(())
     }
 
-    fn next_decoded_frame(&mut self) -> Option<VideoFrame> {
+    fn next_decoded_frame(&mut self) -> crate::Result<Option<VideoFrame>> {
         match self {
-            Self::Initial { .. } => None,
-            Self::Libvpx(decoder) => decoder.next_decoded_frame(),
-            Self::Openh264(decoder) => decoder.next_decoded_frame(),
-            Self::Dav1d(decoder) => decoder.next_decoded_frame(),
+            Self::Initial { .. } => Ok(None),
+            Self::Libvpx(decoder) => Ok(decoder.next_decoded_frame()),
+            Self::Openh264(decoder) => Ok(decoder.next_decoded_frame()),
+            Self::Dav1d(decoder) => Ok(decoder.next_decoded_frame()),
             #[cfg(target_os = "macos")]
             Self::VideoToolbox(decoder) => decoder.next_decoded_frame(),
             #[cfg(feature = "nvcodec")]
