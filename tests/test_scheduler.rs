@@ -3,6 +3,7 @@ use std::{thread, time::Duration};
 use sora_archive_compositor::{
     audio::{AudioData, AudioFormat},
     media::MediaStreamId,
+    output_queue::OutputQueue,
     processor::{
         MediaProcessor, MediaProcessorInput, MediaProcessorOutput, MediaProcessorSpec,
         MediaProcessorWorkloadHint,
@@ -159,6 +160,151 @@ fn idle_poll_is_not_counted_as_processing() {
         processing < waiting,
         "空 poll 待ちが processing に混ざっている: processing={processing:?} waiting={waiting:?}"
     );
+}
+
+/// process_input が Err を返すと集約 Stats.error が立つことを固定する。
+///
+/// ComposeResult.success は `!stats.error.get()` なので、このフラグが true なら
+/// 合成結果は失敗扱いになる（composer 本体を回さなくても完了条件の配線を検証できる）。
+#[test]
+fn process_input_error_sets_aggregate_error_flag() {
+    let stream_id = MediaStreamId::new(0);
+    let source_stats = ProcessorStats::other("delayed_source");
+    let fail_stats = ProcessorStats::other("fail_on_input");
+
+    let mut scheduler = Scheduler::new();
+    scheduler
+        .register(DelayedSource {
+            output_stream_id: stream_id,
+            stats: source_stats,
+            remaining: 1,
+            delay: Duration::ZERO,
+        })
+        .expect("ソースの登録に失敗した");
+    scheduler
+        .register(FailOnInput {
+            input_stream_id: stream_id,
+            stats: fail_stats.clone(),
+        })
+        .expect("失敗プロセッサの登録に失敗した");
+
+    let stats = scheduler.run().expect("スケジューラの実行に失敗した");
+    assert!(
+        stats.error.get(),
+        "process_input の Err なのに集約 Stats.error が立っていない"
+    );
+    let ProcessorStats::Other { error, .. } = &fail_stats else {
+        panic!("FailOnInput は Other 統計であるべき");
+    };
+    assert!(
+        error.get(),
+        "失敗したプロセッサ個別の error も立っているべき"
+    );
+}
+
+/// VideoDecoder / VideoEncoder と同じ `while let Some(x) = queue.pop()?` 形で、
+/// OutputQueue の終端エラーが process_input の Err になり、集約 Stats.error へ届くことを固定する。
+///
+/// 実エンジン（VT / NVCODEC）は環境依存のため、公開 API の OutputQueue を使うプロセッサで
+/// コールバック結果キューの fail-fast 契約とスケジューラ配線を結合検証する。
+#[test]
+fn output_queue_pop_error_reaches_aggregate_stats_error() {
+    let stream_id = MediaStreamId::new(0);
+    let source_stats = ProcessorStats::other("trigger_source");
+    let queue_stats = ProcessorStats::other("output_queue_processor");
+
+    let mut scheduler = Scheduler::new();
+    scheduler
+        .register(DelayedSource {
+            output_stream_id: stream_id,
+            stats: source_stats,
+            remaining: 1,
+            delay: Duration::ZERO,
+        })
+        .expect("ソースの登録に失敗した");
+    scheduler
+        .register(OutputQueueFailProcessor {
+            input_stream_id: stream_id,
+            stats: queue_stats,
+            queue: OutputQueue::new(),
+            armed: false,
+        })
+        .expect("OutputQueue プロセッサの登録に失敗した");
+
+    let stats = scheduler.run().expect("スケジューラの実行に失敗した");
+    assert!(
+        stats.error.get(),
+        "OutputQueue::pop の Err が集約 Stats.error まで届いていない"
+    );
+}
+
+/// 入力サンプルを受け取ったら必ず Err を返すシンク
+struct FailOnInput {
+    input_stream_id: MediaStreamId,
+    stats: ProcessorStats,
+}
+
+impl MediaProcessor for FailOnInput {
+    fn spec(&self) -> MediaProcessorSpec {
+        MediaProcessorSpec {
+            input_stream_ids: vec![self.input_stream_id],
+            output_stream_ids: Vec::new(),
+            workload_hint: MediaProcessorWorkloadHint::CPU_MISC,
+            stats: self.stats.clone(),
+        }
+    }
+
+    fn process_input(&mut self, input: MediaProcessorInput) -> sora_archive_compositor::Result<()> {
+        if input.sample.is_some() {
+            return Err(sora_archive_compositor::Error::new(
+                "intentional process_input failure",
+            ));
+        }
+        Ok(())
+    }
+
+    fn process_output(&mut self) -> sora_archive_compositor::Result<MediaProcessorOutput> {
+        // 入力待ち。エラー後はタスクが除去されるので Finished には到達しない想定
+        Ok(MediaProcessorOutput::pending(self.input_stream_id))
+    }
+}
+
+/// 入力 1 件目で成功を 1 つ積んだ直後に終端エラーを積み、VideoDecoder と同じ pop ループで Err にする
+struct OutputQueueFailProcessor {
+    input_stream_id: MediaStreamId,
+    stats: ProcessorStats,
+    queue: OutputQueue<()>,
+    armed: bool,
+}
+
+impl MediaProcessor for OutputQueueFailProcessor {
+    fn spec(&self) -> MediaProcessorSpec {
+        MediaProcessorSpec {
+            input_stream_ids: vec![self.input_stream_id],
+            output_stream_ids: Vec::new(),
+            workload_hint: MediaProcessorWorkloadHint::CPU_MISC,
+            stats: self.stats.clone(),
+        }
+    }
+
+    fn process_input(&mut self, input: MediaProcessorInput) -> sora_archive_compositor::Result<()> {
+        if input.sample.is_some() && !self.armed {
+            // コールバックエンジンが成功のあとにエラーを積む状況を再現する
+            self.queue.push_ok(());
+            self.queue.push_err(sora_archive_compositor::Error::new(
+                "engine callback failure",
+            ));
+            self.armed = true;
+        }
+
+        // VideoDecoder / VideoEncoder の process_input と同じ取り出し形
+        while let Some(()) = self.queue.pop()? {}
+        Ok(())
+    }
+
+    fn process_output(&mut self) -> sora_archive_compositor::Result<MediaProcessorOutput> {
+        Ok(MediaProcessorOutput::pending(self.input_stream_id))
+    }
 }
 
 /// 入力と出力を同じストリームにして送信側を自分で保持し、Disconnected にしない

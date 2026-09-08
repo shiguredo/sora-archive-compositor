@@ -1,5 +1,7 @@
 use shiguredo_mp4::boxes::{Avc1Box, AvccBox, SampleEntry};
 use shiguredo_openh264::Openh264Library;
+#[cfg(any(target_os = "macos", feature = "nvcodec"))]
+use sora_archive_compositor::types::EngineName;
 use sora_archive_compositor::{
     decoder::{VideoDecoder, VideoDecoderOptions},
     media::MediaStreamId,
@@ -10,7 +12,7 @@ use sora_archive_compositor::{
 };
 #[cfg(feature = "nvcodec")]
 use sora_archive_compositor::{
-    types::{CodecName, EngineName},
+    types::CodecName,
     video_h264::{H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS},
     video_h265::{H265_NALU_TYPE_PPS, H265_NALU_TYPE_SPS, H265_NALU_TYPE_VPS, NALU_HEADER_LENGTH},
 };
@@ -197,6 +199,60 @@ fn prepend_h264_sps_pps(mut frame: VideoFrame) -> MediaProcessorInput {
 
     // 対象外のフレームはそのまま返す
     MediaProcessorInput::video_frame(DECODER_INPUT_STREAM_ID, frame)
+}
+
+/// VideoToolbox 経路でデコードコールバックエラーが VideoDecoder::process_input の Err になることを固定する。
+///
+/// 正常フレームでデコーダを初期化したあと、明らかに壊した NAL を流し EOS で flush する。
+/// fail-fast 化以前はログ捨てで Ok のまま進んでいた経路。
+#[test]
+#[cfg(target_os = "macos")]
+fn videotoolbox_decode_error_surfaces_via_process_input() -> sora_archive_compositor::Result<()> {
+    let source_id = SourceId::new("archive-blue-640x480-h264");
+    let mut reader = Mp4VideoReader::new(
+        source_id,
+        "testdata/archive-blue-640x480-h264.mp4",
+        Default::default(),
+    )?;
+    let good = reader
+        .next()
+        .expect("少なくとも 1 フレームある")
+        .expect("フレーム読み取りに失敗した");
+
+    // 長さ付き NAL として見えるが中身は壊れているペイロード
+    let mut corrupt = good.clone();
+    corrupt.data = {
+        let mut data = Vec::new();
+        data.extend_from_slice(&8u32.to_be_bytes());
+        data.extend_from_slice(&[0x65, 0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x00, 0x00]);
+        data
+    };
+    corrupt.keyframe = true;
+
+    let options = VideoDecoderOptions {
+        openh264_lib: None,
+        decode_params: Default::default(),
+        engines: Some(vec![EngineName::VideoToolbox]),
+    };
+    let mut decoder = VideoDecoder::new(DECODER_INPUT_STREAM_ID, DECODER_OUTPUT_STREAM_ID, options);
+
+    // 初期化用の正常フレーム（SPS/PPS 付き）
+    decoder.process_input(prepend_h264_sps_pps(good))?;
+    // 壊したフレームを投入し、必要なら EOS の finish でコールバック完了を待つ
+    let corrupt_result = decoder.process_input(MediaProcessorInput::video_frame(
+        DECODER_INPUT_STREAM_ID,
+        corrupt,
+    ));
+    let result = if corrupt_result.is_err() {
+        corrupt_result
+    } else {
+        decoder.process_input(MediaProcessorInput::eos(DECODER_INPUT_STREAM_ID))
+    };
+    assert!(
+        result.is_err(),
+        "壊した H.264 を VideoToolbox に流したのに process_input が Ok のまま: {result:?}"
+    );
+    Ok(())
 }
 
 /// 1 トラック内でキーフレーム毎に解像度が変わる多エントリ stsd の MP4 を NVDEC でデコードし、
