@@ -3,15 +3,17 @@ use std::time::Duration;
 
 use sora_archive_compositor::decoder_libvpx::LibvpxDecoder;
 use sora_archive_compositor::{
+    audio::AudioData,
     decoder::{VideoDecoder, VideoDecoderOptions},
     decoder_opus::OpusDecoder,
     media::MediaStreamId,
     metadata::SourceId,
+    mixer_audio::MIXED_AUDIO_DATA_DURATION,
     processor::{MediaProcessor, MediaProcessorInput, MediaProcessorOutput},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     stats::{Mp4AudioReaderStats, Mp4VideoReaderStats},
     types::{CodecName, EngineName},
-    video::VideoFrame,
+    video::{FrameRate, VideoFrame},
 };
 
 /// compose サブコマンドを実行する。
@@ -48,6 +50,58 @@ fn run_compose(
         return Err("sora-archive-compositor コマンドが失敗した".into());
     }
     Ok(())
+}
+
+/// 連続入力の出力について、1 トラック内のサンプル列が 0 基点・連続・想定 duration グリッドかを検証する。
+///
+/// トラック尺の合計だけ見ると、duration が 2 倍でサンプル数が半分、のような stts 崩れを取り逃がす。
+/// 音声・映像それぞれのトラック内契約だけを見る。A/V の終端時刻一致は現行の正常出力でも
+/// 一致しない（例: 音声 1020ms・映像 1000ms）ため検証しない。
+fn assert_continuous_track_timestamps(
+    samples: &[(Duration, Duration)],
+    expected_sample_duration: Duration,
+    track: &str,
+) {
+    assert!(!samples.is_empty(), "{track}: サンプルが 1 つもない");
+    assert_eq!(
+        samples[0].0,
+        Duration::ZERO,
+        "{track}: 先頭サンプルの timestamp が 0 ではない: {:?}",
+        samples[0].0
+    );
+
+    for (i, &(timestamp, duration)) in samples.iter().enumerate() {
+        assert_eq!(
+            duration, expected_sample_duration,
+            "{track}: サンプル {i} の duration が想定グリッドと違う: 実際={duration:?}, 期待={expected_sample_duration:?}"
+        );
+        if let Some(&(next_timestamp, _)) = samples.get(i + 1) {
+            assert_eq!(
+                next_timestamp,
+                timestamp + duration,
+                "{track}: サンプル {i} の次が timestamp+duration に連続していない: 実際={next_timestamp:?}, 期待={:?}",
+                timestamp + duration
+            );
+        }
+    }
+}
+
+/// 音声トラックのサンプル列が 20ms グリッドで 0 基点・連続であることを検証する。
+fn assert_audio_track_timestamps(samples: &[AudioData]) {
+    let pairs: Vec<_> = samples
+        .iter()
+        .map(|sample| (sample.timestamp, sample.duration))
+        .collect();
+    assert_continuous_track_timestamps(&pairs, MIXED_AUDIO_DATA_DURATION, "音声");
+}
+
+/// 映像トラックのサンプル列がレイアウトの frame_rate グリッドで 0 基点・連続であることを検証する。
+fn assert_video_track_timestamps(samples: &[VideoFrame], frame_rate: FrameRate) {
+    let pairs: Vec<_> = samples
+        .iter()
+        .map(|sample| (sample.timestamp, sample.duration))
+        .collect();
+    assert_continuous_track_timestamps(&pairs, frame_rate.frame_duration(), "映像");
 }
 
 /// ソースが空の場合
@@ -103,7 +157,7 @@ fn test_simple_single_source_common(
 
         let mut video_reader =
             Mp4VideoReader::new(SourceId::new("dummy"), out_file.path(), video_stats())?;
-        video_reader
+        let video_samples = video_reader
             .by_ref()
             .collect::<sora_archive_compositor::Result<Vec<_>>>()?;
 
@@ -123,6 +177,8 @@ fn test_simple_single_source_common(
             video_stats.total_track_duration.get(),
             Duration::from_secs(1)
         );
+        // AAC 経路でも映像トラック内のタイムスタンプ整合は検証する
+        assert_video_track_timestamps(&video_samples, FrameRate::FPS_25);
         return Ok(());
     }
 
@@ -169,6 +225,11 @@ fn test_simple_single_source_common(
         video_stats.total_track_duration.get(),
         Duration::from_secs(1)
     );
+
+    // トラック尺の合計だけでなく、サンプル列の timestamp / duration も検証する
+    // A/V 終端時刻の一致は要求しない（音声 1020ms・映像 1000ms が現行の正常出力）
+    assert_audio_track_timestamps(&audio_samples);
+    assert_video_track_timestamps(&video_samples, FrameRate::FPS_25);
 
     // 音声をデコードをして中身を確認する
     let mut decoder = OpusDecoder::new()?;
@@ -527,6 +588,11 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
         Duration::from_secs(1)
     );
 
+    // トラック尺の合計だけでなく、サンプル列の timestamp / duration も検証する
+    // A/V 終端時刻の一致は要求しない（音声 1020ms・映像 1000ms が現行の正常出力）
+    assert_audio_track_timestamps(&audio_samples);
+    assert_video_track_timestamps(&video_samples, FrameRate::FPS_25);
+
     // 音声をデコードをして中身を確認する
     let mut decoder = OpusDecoder::new()?;
     for data in audio_samples {
@@ -863,6 +929,11 @@ fn multi_sources_single_column() -> noargs::Result<()> {
         video_stats.total_track_duration.get(),
         Duration::from_secs(1)
     );
+
+    // トラック尺の合計だけでなく、サンプル列の timestamp / duration も検証する
+    // A/V 終端時刻の一致は要求しない（音声 1020ms・映像 1000ms が現行の正常出力）
+    assert_audio_track_timestamps(&audio_samples);
+    assert_video_track_timestamps(&video_samples, FrameRate::FPS_25);
 
     // 音声をデコードをして中身を確認する
     let mut decoder = OpusDecoder::new()?;
