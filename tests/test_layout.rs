@@ -8,8 +8,7 @@ use sora_archive_compositor::{
     layout::{self, AggregatedSourceInfo, AssignedSource, Layout, Resolution},
     // テスト関数名を無装飾に揃えるため、同名の公開 API は別名で import する
     layout_region::{
-        ReuseKind,
-        assign_sources as do_assign_sources,
+        ReuseKind, assign_sources as do_assign_sources,
         decide_grid_dimensions as do_decide_grid_dimensions,
         decide_required_cells as do_decide_required_cells,
     },
