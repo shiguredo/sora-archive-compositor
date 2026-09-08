@@ -1,7 +1,7 @@
 # e2e テストに出力 MP4 のトラック内タイムスタンプ整合を追加する
 
 - Created: 2026-08-04
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-08
 - Branch: feature/test-add-output-timestamp-validation
 - Polished: 2026-08-28
 
@@ -57,3 +57,13 @@
 - A/V 終端一致を要求するアサートを入れてない
 - （含める場合）trim 付き compose の E2E がある
 - `cargo test --workspace` が全 pass する
+
+## 解決方法
+
+`tests/e2e.rs` にトラック内タイムスタンプ整合のヘルパーを追加し、連続入力の compose E2E から呼び出すようにした。
+
+- `assert_continuous_track_timestamps` で先頭 0・単調連続・想定 duration グリッドを検証する
+- 音声は `MIXED_AUDIO_DATA_DURATION`（20ms）、映像は `FrameRate::FPS_25`（40ms）を使う
+- 適用先は `test_simple_single_source_common`（AAC 経路は映像のみ）、`odd_resolution_single_source`、`multi_sources_single_column`
+- A/V 終端時刻の一致はアサートしていない
+- trim 付き compose の E2E は任意条件のため今回は含めなかった
