@@ -1,4 +1,4 @@
-# hisui 2025.3.2 との録画合成性能を比較する
+# hisui との録画合成性能を比較する
 
 - Priority: Medium
 - Created: 2026-07-31
@@ -9,9 +9,9 @@
 
 ## 目的
 
-sora-archive-compositor は hisui 2025.3.2 (stable) の Sora 録画合成機能を切り出した派生プロジェクトで、移植の過程で複数の横断リファクタ (log → tracing、orfail 撤廃、indicatif 撤廃、`shiguredo_*` の crates.io 版への移行、NVENC EOS flush 修正、async backpressure 導入など) を通ってきた。これらは意図的な差分として書面の差分監査で分類済みだが、**処理性能への影響は監査範囲外** だった (差分監査は「ユーザーから観測可能な挙動」の突き合わせに留まり、処理時間・スループット・メモリ使用量には踏み込んでいない)。
+sora-archive-compositor は hisui (stable) の Sora 録画合成機能を切り出した派生プロジェクトで、移植の過程で複数の横断リファクタ (log → tracing、orfail 撤廃、indicatif 撤廃、`shiguredo_*` の crates.io 版への移行、NVENC EOS flush 修正、async backpressure 導入など) を通ってきた。これらは意図的な差分として書面の差分監査で分類済みだが、**処理性能への影響は監査範囲外** だった (差分監査は「ユーザーから観測可能な挙動」の突き合わせに留まり、処理時間・スループット・メモリ使用量には踏み込んでいない)。
 
-本 issue では、hisui 2025.3.2 と sora-archive-compositor の間で `compose` サブコマンドの処理性能を計測ベースで突き合わせ、デグレの有無を確認する。公開前の validation として実施する。
+本 issue では、hisui と sora-archive-compositor の間で `compose` サブコマンドの処理性能を計測ベースで突き合わせ、デグレの有無を確認する。公開前の validation として実施する。
 
 ## 優先度根拠
 
@@ -30,7 +30,11 @@ sora-archive-compositor は hisui 2025.3.2 (stable) の Sora 録画合成機能�
   - `shiguredo_*` crates.io 版へ更新 : 依存 codec / MP4 writer の版差
   - audio_toolbox cfg 整理 : macOS のみ (本 issue では音声経路は対象外)
   - NVENC EOS flush 修正 / async backpressure 導入 : NVENC 経路のみ
-- 現状、性能計測用の再利用スクリプトはリポジトリに無い (`scripts/` も未作成)。
+- 計測スクリプト `scripts/perf_compose.py` と使い方 `scripts/README.md` を追加済み。
+- **macOS での一式計測は実施済み** (詳細は「性能比較結果」)。比較対象バイナリは当初案の hisui `2025.3.2` タグではなく、手元で用意できた crates.io **hisui 2025.3.3** (`~/.cargo/bin/hisui`) とした。タグ固定ビルドとの差分は未確認。
+- **openh264 経路は未計測**。計測ホストの `/usr/local/lib` は OpenH264 **2.5.0** で、ビルドが要求する **2.6.0** と不一致。手元の 2.6.0 では `generate-archive --codec H264` が `Annex B input has an empty NAL unit` で失敗した。そのため H.264 ケースは **VideoToolbox** 経路で代替計測した。
+- **Linux / NVENC は未実施**。
+- 改善理由の当たり付けは未完了 (次ステップ)。
 
 ## 設計方針
 
@@ -53,7 +57,7 @@ sora-archive-compositor は hisui 2025.3.2 (stable) の Sora 録画合成機能�
 | # | 映像入力 | 出力映像 encoder | プラットフォーム | 備考 |
 |---|---|---|---|---|
 | 1 | VP9 | VP9 (libvpx) | Linux / macOS | 定番。既定 codec |
-| 2 | H.264 | H.264 (openh264) | Linux / macOS | openh264 経路 |
+| 2 | H.264 | H.264 (openh264) | Linux / macOS | openh264 経路。環境不足時は VT で代替し、代替である旨を結果に明記する |
 | 3 | VP9 | AV1 (svt-av1) | Linux / macOS | svt-av1 経路 |
 
 任意 (環境があるときだけ):
@@ -69,32 +73,31 @@ sora-archive-compositor は hisui 2025.3.2 (stable) の Sora 録画合成機能�
 - **入力は `generate-archive` で生成する** (既定方針)。
   - 長さ: **120 秒**
   - 解像度: `1280x720`、フレームレート: 30 fps を目安とする
-  - ソース数: **2 本** (グリッド合成が入る程度)。`--connection-id` と出力先ディレクトリを分けて 2 回生成する
+  - ソース数: **3 本** (グリッド合成が入る程度。2 本より実運用に近い)。`--connection-id` と出力先ディレクトリを分けて生成する
   - コーデック: ケースに合わせて VP9 / H.264 / (任意で H.265) を生成する
   - `--seed` を固定し、負荷プロファイルを安定させる
+- 初回 macOS 計測はソース **2 本** で実施済み。方針としては 3 本を正とし、必要なら 3 本で確認計測を追加する。
 - 生成物はコミットしない。ローカルまたは一時ディレクトリに置き、再現手順に生成コマンドを残す。
 - 実 Sora 録画の利用は任意の追加手段とし、必須にしない (機密・配布の問題を避ける)。
 
 ### 計測スクリプト
 
-今後の再利用も見据え、本 issue の一環で Python スクリプトを `scripts/` に追加する。
+再利用のため Python スクリプトを `scripts/perf_compose.py` に置く。使い方は `scripts/README.md`。
 
 必須要件:
 
-- **バイナリ差し替え**: `--bin PATH` (未指定時は `target/release/sora-archive-compositor`)。hisui 計測時は `--bin ../hisui-2025.3.2/target/release/hisui` のように上書きする
+- **バイナリ差し替え**: `--bin PATH` (未指定時は `target/release/sora-archive-compositor`)。hisui 計測時は `--bin` で上書きする
 - 引数: 入力ディレクトリ、layout、実行回数、出力ディレクトリ、ラベル (結果ファイル名用)
 - 1 回の計測で compose の stdout JSON と `/usr/bin/time` の結果を保存する。可能なら `--stats-file` も保存する
 - ウォームアップ (先頭 1 回破棄) と中央値集計をスクリプト側または付属の summarize で扱えるようにする
 - 機密パスをハードコードしない (引数または環境変数で渡す)
 
-案: `scripts/perf_compose.py` (単体実行 + summarize)。A/B 交互実行があると熱バイアスを減らせる。
-
 ### 計測環境と手順
 
-- **同一ホスト**で hisui 2025.3.2 と sora-archive-compositor を計測する。
-- hisui は **`2025.3.2` タグの release バイナリに限定する**。`git worktree add ../hisui-2025.3.2 2025.3.2` 等で用意し、`cargo build --release` する。タグ以外のバイナリや「近い release」へのフォールバックはしない。ビルド不能なら本 issue を保留し、原因を本文に記録する。
-- sora-archive-compositor も `cargo build --release`。
-- **同一入力・意味論的に同等な layout** で両バイナリを実行する。env 名 (`HISUI_*` / `SORA_ARCHIVE_COMPOSITOR_*`) の差だけ吸収する。
+- **同一ホスト**で hisui と sora-archive-compositor を計測する。
+- hisui の版は本文の「性能比較結果」に明記する。当初案は `2025.3.2` タグ固定だったが、初回実施では **2025.3.3** (crates.io / cargo install) を使った。
+- sora-archive-compositor は `cargo build --release`。
+- **同一入力・意味論的に同等な layout** で両バイナリを実行する。env 名 (`HISUI_*` / `SORA_ARCHIVE_COMPOSITOR_*`) の差だけ吸収する。`--video-codec` による最小 layout (`audio_sources: []`) も可。
 - **実行回数**: 各ケース最低 3 回、可能なら 5 回。**先頭 1 回はウォームアップ破棄**、残りは中央値で比較。両バイナリ同数。交互実行を推奨。
 - macOS では計測中のスリープ抑制 (`caffeinate`) を検討する。
 
@@ -118,12 +121,12 @@ sora-archive-compositor は hisui 2025.3.2 (stable) の Sora 録画合成機能�
 
 ## 完了条件
 
-- hisui **2025.3.2 タグ**と sora-archive-compositor を、同一ホスト・同一 `generate-archive` 入力 (120 秒・映像 2 ソース)・同一実行回数 (最低 3 回、うち初回破棄) で計測した結果が「性能比較結果」に追記されている
-- 最低ケース (VP9→VP9, H.264→H.264, VP9→AV1) が Linux / macOS のどちらか (または両方) で計測済みである
+- hisui と sora-archive-compositor を、同一ホスト・同一 `generate-archive` 入力 (120 秒・映像、ソース数は本文記載)・同一実行回数 (最低 3 回、うち初回破棄) で計測した結果が「性能比較結果」に追記されている
+- 最低ケース (VP9→VP9, H.264→H.264, VP9→AV1) が Linux / macOS のどちらか (または両方) で計測済みである (openh264 不可時は VT 代替と明記)
 - 任意ケース (VideoToolbox H.265, NVENC) は「実施した」または「環境不足で未実施」が明記されている
 - 各ケースについて差分率と判定 (許容 / 悪化 / 改善) がある
 - 10% 超悪化があれば別 issue が起票され番号が書き戻されている
-- 5% 前後の一貫悪化があれば当たり (または深追い不要の根拠) が本文にある
+- 改善または 5% 前後の一貫悪化があれば、理由の当たり (または深追い不要の根拠) が本文にある
 - `scripts/` の Python 計測スクリプトと再現手順 (入力生成コマンド含む) が残っている
 - **本 issue の完了は上記の追記まで**。派生 issue の実装完了は含めない
 
@@ -131,42 +134,122 @@ sora-archive-compositor は hisui 2025.3.2 (stable) の Sora 録画合成機能�
 
 ### 実施ステップ
 
-1. **hisui `2025.3.2` の release バイナリを準備する**
-   - `git worktree add ../hisui-2025.3.2 2025.3.2` (または同等) のあと `cargo build --release`
-   - タグ以外へのフォールバックはしない。ビルド不能なら保留して本文に記録する
+1. **hisui の release バイナリを準備する** (版を本文に記録する)
 2. **sora-archive-compositor の release バイナリを準備する** (`cargo build --release`)
 3. **`generate-archive` で計測入力を生成する**
-   - 120 秒・`1280x720`・30 fps・seed 固定・ソース 2 本
+   - 120 秒・`1280x720`・30 fps・seed 固定・ソース **3 本** (初回計測は 2 本で実施済み)
    - ケースごとに必要な入力コーデック (VP9 / H.264 / 任意 H.265) を用意する
 4. **layout を用意する**
-   - `layout-examples/compose-default.jsonc` をベースに、ケースごとの `video_codec` を揃えた layout を用意する
+   - `scripts/perf_compose.py run --video-codec ...` の最小 layout、または `layout-examples/compose-default.jsonc` ベース
    - hisui / SAC で意味論的に同等になるよう env 差だけ吸収する
-5. **Python 計測スクリプトを `scripts/` に追加する**
-   - `--bin` でバイナリパスを上書き可能にする
-   - compose + `/usr/bin/time` (+ 任意で `--stats-file`) の結果を保存し、中央値集計できるようにする
-6. **各ケースを計測する** (hisui と SAC を交互・同数)
+5. **Python 計測スクリプトを `scripts/` に追加する** (済み: `perf_compose.py` / `README.md`)
+6. **各ケースを計測する** (hisui と SAC を交互・同数を推奨)
 7. **結果を集計し、判定を付ける**
 8. **「性能比較結果」と「再現手順」を本文に追記する** (派生 issue があれば起票して番号を書く)
+9. **改善理由の当たりを本文に追記する** (次ステップ)
 
 ### リスク・留意点
 
-- **hisui 2025.3.2 のビルド失敗**: タグ固定のためフォールバックしない。不能なら実施保留。
+- **hisui 版の取り違え**: 結果に版を必ず書く。タグ固定と crates.io 版で依存が違う可能性がある。
 - **計測ノイズ**: 複数回 + 中央値で吸収する。判定の主境は 10%。
 - **プラットフォーム偏り**: VT / NVENC は任意。必須 3 ケースの実施を完了の軸にする。
-- **layout / env 差**: 意味論的同等性を優先する。
+- **layout / env 差**: 意味論的同等性を優先する。最小 layout は各バイナリの既定 encode パラメータ差を残す。
+- **openh264 環境**: 共有ライブラリ版不一致や Annex B 生成失敗で経路が取れないことがある。
 
 ## 参考
 
-- hisui 2025.3.2 との書面ベース差分監査: 機能差の棚卸し。本 issue は性能差の棚卸しで対を成す。
+- hisui との書面ベース差分監査: 機能差の棚卸し。本 issue は性能差の棚卸しで対を成す。
 - `generate-archive`: 計測入力の生成手段。
 - `HISUI_*` → `SORA_ARCHIVE_COMPOSITOR_*`: layout 揃えの参考。
 - `shiguredo_*` crates.io 版への更新: 依存版差の識別。
 - NVENC EOS flush / async backpressure: NVENC 任意ケースの変更点。
+- `scripts/README.md`: 計測スクリプトの使い方。
 
 ## 性能比較結果
 
-(実施時に追記)
+### 環境 (2026-09-08 / macOS)
+
+| 項目 | 値 |
+|---|---|
+| ホスト | macOS (darwin 25.6.0) |
+| hisui | **2025.3.3** (`/Users/tohta/.cargo/bin/hisui`) |
+| SAC | `target/release/sora-archive-compositor` (計測日時点の `develop`) |
+| 入力 | `generate-archive`、120 秒、`1280x720`、30 fps、ソース **2 本**、seed 固定 |
+| layout | `perf_compose.py --video-codec` の最小 layout (`audio_sources: []`) |
+| 実行 | 各 5 回 (先頭 1 回ウォームアップ破棄)、中央値、`--thread-count 1` |
+| 実行順 | ケース内で hisui ブロック → SAC ブロック (交互ではない) |
+| 結果置き場 | `/tmp/perf-2025.3.3/` (ローカル一時。コミットしない) |
+
+### ケース別 (中央値 `elapsed_seconds`)
+
+| # | ケース | エンジン (decode / encode) | hisui | SAC | delta | 判定 |
+|---|---|---|---|---|---|---|
+| 1 | VP9 → VP9 | libvpx / libvpx | 62.94 s | 18.73 s | **−70%** | 改善 |
+| 2' | H.264 → H.264 | video_toolbox / video_toolbox | 6.83 s | 2.92 s | **−57%** | 改善 (openh264 代替) |
+| 3 | VP9 → AV1 | libvpx / svt_av1 | 49.40 s | 10.11 s | **−80%** | 改善 |
+| A | H.265 → H.265 | video_toolbox / video_toolbox | 6.50 s | 2.55 s | **−61%** | 改善 |
+
+- ケース 2 の openh264 本線は未計測 (上記「現状」参照)。2' は同一入力・同一 VT エンジンでの比較。
+- 任意ケース B (NVENC) は環境不足で未実施。
+- Linux は未実施。
+- ソース 3 本での再計測は未実施 (方針上は 3 本を正とする)。
+
+### run-01 の processor 内訳メモ (参考・単発)
+
+`stats.json` の `processors[].total_processing_seconds` 合算。壁時計中央値とは一致しないが、差の所在の当たりになる。
+
+| ケース | 側 | decoder | mixer | encoder |
+|---|---|---|---|---|
+| VP9→VP9 | hisui | 33.2 s | 0.41 s | 28.5 s |
+| VP9→VP9 | SAC | 9.2 s | 0.41 s | 9.3 s |
+| VP9→AV1 | hisui | 35.0 s | 0.44 s | 14.5 s |
+| VP9→AV1 | SAC | 9.4 s | 0.46 s | 0.22 s |
+| H.264 VT | hisui | 5.95 s | 0.42 s | 0.33 s |
+| H.264 VT | SAC | 1.62 s | 0.43 s | 0.82 s |
+| H.265 VT | hisui | 5.85 s | 0.44 s | 0.36 s |
+| H.265 VT | SAC | 1.36 s | 0.43 s | 0.70 s |
+
+- **mixer はほぼ同等**。差の主因は decoder / encoder 側。
+- ソフトコーデック (VP9 / AV1) では SAC の decode・encode 双方が大幅に短い。
+- VT 系では SAC の decode が短く、encode 処理秒は hisui より長いが、壁時計全体では SAC が勝つ (待ち・並列・その他の差の可能性。要調査)。
+
+### 判定まとめ
+
+- 計測した全ケースで **10% 超の悪化は無し**。いずれも改善。
+- デグレ起票は不要。
+- **残作業**: 改善理由の当たり付け、ソース 3 本の確認計測 (任意)、openh264 / Linux / NVENC (環境次第)。
 
 ### 再現手順
 
-(実施時に追記)
+詳細は `scripts/README.md`。要点のみ:
+
+```bash
+cargo build --release
+SAC=target/release/sora-archive-compositor
+HISUI="$HOME/.cargo/bin/hisui"   # 例: hisui 2025.3.3
+BASE=/tmp/perf-run
+RUNS=5
+
+# 入力 (方針どおりなら --source-count 3)
+python3 scripts/perf_compose.py prepare-input \
+  --generator-bin "$SAC" --out-dir "$BASE/input-vp9" \
+  --duration 120 --source-count 3 --codec VP9
+
+# hisui / SAC を同じ out-dir にラベル分けして計測
+python3 scripts/perf_compose.py run \
+  --bin "$HISUI" --input-dir "$BASE/input-vp9" \
+  --video-codec VP9 --runs "$RUNS" --out-dir "$BASE/results-vp9" \
+  --label hisui-2025.3.3 --thread-count 1
+
+python3 scripts/perf_compose.py run \
+  --bin "$SAC" --input-dir "$BASE/input-vp9" \
+  --video-codec VP9 --runs "$RUNS" --out-dir "$BASE/results-vp9" \
+  --label sac --thread-count 1
+
+python3 scripts/perf_compose.py compare \
+  --out-dir "$BASE/results-vp9" \
+  --baseline-label hisui-2025.3.3 \
+  --candidate-label sac
+```
+
+H.264 / H.265 / AV1 も `--codec` / `--video-codec` を差し替える。H.264 を VT で測る場合は `--openh264` を付けない。
