@@ -1,7 +1,7 @@
 # tune 系モジュール (tune / tune_storage / tune_rng) のテストを追加する
 
 - Created: 2026-08-04
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-08
 - Branch: feature/test-add-tune-tests
 - Polished: {YYYY-MM-DD}
 
@@ -32,3 +32,11 @@
 - `LockGuard` の stale ロック奪取 (PID が死んでいる / 生きている両ケース) のテストがある
 - `gen_range_i64` の分布・境界のテストがある
 - `cargo test --workspace` が全 pass する
+
+## 解決方法
+
+対応不要と判断し、実装せず closed にした。
+
+- `tune` は合成本体ではなくパラメータ探索用の補助コマンドであり、永続化・乱数・ロックの堅牢性が最重要という位置づけではない
+- JSONL やロックが万一壊れても、探索を一からやり直せば足りる。破損自体の可能性も低い
+- 最適化本体 (`tune_nsga2`) には既にテストがあり、本 issue で足す周辺テストの投資対効果は低い
