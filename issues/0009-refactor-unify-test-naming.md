@@ -1,7 +1,7 @@
 # テストファイル・テスト関数の命名規則を統一する
 
 - Created: 2026-08-04
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-08
 - Branch: feature/refactor-unify-test-naming
 - Polished: 2026-09-08
 
@@ -74,3 +74,12 @@ hisui の `tests/` も `test_*` / `*_tests.rs` / `e2e.rs` が混在しており�
 - `tests/` 直下のファイル名が上記の採用規約に従っている（`*_test.rs` / `*_tests.rs` が残っていない）
 - `tests/` および `src/` の `#[cfg(test)]` から、`test_` 接頭辞・`_works` / `_test` 接尾辞付きのテスト関数名・テスト専用ヘルパー名が無くなっている
 - `cargo test --workspace` が全 pass する
+
+## 解決方法
+
+`shiguredo-rust` の命名規約に合わせてリネームした。
+
+- ファイル: `layout_test` / `mixer_*_test` / `reader_webm_test` / `decoder_tests` / `writer_mp4_tests` を `test_<module>.rs` へ。`e2e.rs` と既存の `test_*.rs` は据え置き
+- 関数・ヘルパー: `test_` 接頭辞、`_works` / `_test` 接尾辞を除去（`tests/` と `src/` の `#[cfg(test)]`）
+- `test_layout.rs` では同名の公開 API と衝突するため、import を `do_*` 別名にした
+- 参照更新: `src/layout.rs` コメント、`testdata/trim/README.md`、`testdata/source_timestamps/README.md`
