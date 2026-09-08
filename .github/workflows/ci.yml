@@ -127,7 +127,7 @@ jobs:
   # NVIDIA Video Codec (nvcodec) 経路を検証する。
   # hisui の test-nvidia-video-codec と同じ self-hosted 指定 (GPU + SDK 前提)。
   # apt / setup-cuda-toolkit は置かない (runner 側に導入済みであることが前提)。
-  # OPENH264_PATH は置かない。decoder_tests の一部は無言スキップし得るが、
+  # OPENH264_PATH は置かない。test_decoder の一部は無言スキップし得るが、
   # nvcodec の主検証は e2e 側なので本ジョブでは扱わない
   test-nvidia-video-codec:
     runs-on:
@@ -164,7 +164,7 @@ jobs:
     env:
       # 版数は shiguredo_openh264 の external-dependencies メタデータに合わせる (v は付けない)
       OPENH264_VERSION: "2.6.0"
-      # tests/decoder_tests.rs が読む名前。CLI が読む SORA_ARCHIVE_COMPOSITOR_OPENH264_PATH とは別物で、
+      # tests/test_decoder.rs が読む名前。CLI が読む SORA_ARCHIVE_COMPOSITOR_OPENH264_PATH とは別物で、
       # 未設定だと H.264 / VP9 / AV1 の decoder テストが無言でスキップされて緑になる
       OPENH264_PATH: ${{ github.workspace }}/libopenh264.so
     steps:
@@ -196,7 +196,7 @@ jobs:
         # 既定の bash -e では tee の終了コードが採用され cargo test の失敗が隠れる
         shell: bash
         run: |
-          cargo test --test decoder_tests -- --nocapture 2>&1 | tee /tmp/decoder.log
+          cargo test --test test_decoder -- --nocapture 2>&1 | tee /tmp/decoder.log
           if grep -q '利用可能な H.264 デコーダーがない' /tmp/decoder.log; then exit 1; else exit 0; fi
 
   # 全ジョブの結果を Slack に通知する。
