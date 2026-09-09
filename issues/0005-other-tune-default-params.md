@@ -1,7 +1,7 @@
 # tune の結果に基づくデフォルトパラメータの決定
 
 - Created: 2026-08-04
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-09
 - Branch: feature/tune-default-params
 - Polished: {YYYY-MM-DD}
 
@@ -91,3 +91,13 @@
 - `enable_restoration_filtering` を -1〜1 にした
 - `tile_columns` を 1〜4 (log2) にした
 - `docs/layout_encode_params.md` の「指定可能な範囲」を探索空間の部分集合ではなく crate の受理範囲に直した
+
+## 解決方法
+
+既存既定を `tune` で作り直す必要はないと判断し、`compose-default.jsonc` の数値は維持したうえで closed にした。
+
+- 0002 の macOS 計測で、既存既定での劣化は確認されなかった
+- crate 差分を突き合わせ、明らかに変えるべき既定はなかった
+- 新規パラメーターは省略し、ライブラリ既定に任せた
+- `search-space-examples/full.jsonc` と `docs/layout_encode_params.md` の範囲を crate 検証に合わせた
+- 利用可能パラメーターの棚卸しは `issues/0004-doc-organize-migration-doc.md` へ渡した
