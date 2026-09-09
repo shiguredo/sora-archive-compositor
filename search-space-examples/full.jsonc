@@ -1,8 +1,18 @@
+// デフォルトの探索空間定義。
+//
+// 各エントリの min / max および候補リストは tune 用の探索範囲である。
+// エンコーダーの指定可能範囲と一致するとは限らない。
+// 指定可能範囲の詳細は docs/layout_encode_params.md を参照する。
+//
+// 指定可能範囲が広く、全範囲を探索すると非現実的な試行になる項目には、
+// 個別コメントで指定可能範囲を書いてある。
 {
+  // 指定可能範囲は 0〜63。min / max を独立にサンプルするため、逆転しにくい帯域に分けている。
   "libvpx_vp8_encode_params.min_quantizer": {
     "min": 4,
     "max": 29
   },
+  // 指定可能範囲は 0〜63。
   "libvpx_vp8_encode_params.max_quantizer": {
     "min": 30,
     "max": 58
@@ -29,6 +39,7 @@
     "min": 1,
     "max": 25
   },
+  // 指定可能範囲は 1 以上 (処理系依存)。探索は 1〜16。
   "libvpx_vp8_encode_params.threads": {
     "min": 1,
     "max": 16
@@ -37,6 +48,7 @@
     true,
     false
   ],
+  // 指定可能範囲は 1 以上。探索は 1〜600。
   "libvpx_vp8_encode_params.keyframe_interval": {
     "min": 1,
     "max": 600
@@ -70,10 +82,12 @@
     2,
     3
   ],
+  // 指定可能範囲は 0〜63。min / max を独立にサンプルするため、逆転しにくい帯域に分けている。
   "libvpx_vp9_encode_params.min_quantizer": {
     "min": 4,
     "max": 29
   },
+  // 指定可能範囲は 0〜63。
   "libvpx_vp9_encode_params.max_quantizer": {
     "min": 30,
     "max": 58
@@ -100,6 +114,7 @@
     "min": 1,
     "max": 25
   },
+  // 指定可能範囲は 1 以上 (処理系依存)。探索は 1〜16。
   "libvpx_vp9_encode_params.threads": {
     "min": 1,
     "max": 16
@@ -108,6 +123,7 @@
     true,
     false
   ],
+  // 指定可能範囲は 1 以上。探索は 1〜600。
   "libvpx_vp9_encode_params.keyframe_interval": {
     "min": 1,
     "max": 600
@@ -148,14 +164,18 @@
     "min": 0,
     "max": 63
   },
+  // 指定可能範囲は 0〜63。探索は品質下限側の 1〜20。
   "svt_av1_encode_params.min_qp_allowed": {
     "min": 1,
     "max": 20
   },
+  // 指定可能範囲は 0〜63。探索は品質上限側の 35〜63。
   "svt_av1_encode_params.max_qp_allowed": {
     "min": 35,
     "max": 63
   },
+  // 指定可能値は "vbr" / "cbr" / "cqp_or_crf"。
+  // "cqp_or_crf" は target_bit_rate を 0 にする必要があり、探索から外している。
   "svt_av1_encode_params.rate_control_mode": [
     "vbr",
     "cbr"
@@ -168,33 +188,31 @@
     "min": 0,
     "max": 100
   },
+  // 指定可能範囲は 1 以上 (i32 に収まる値)。探索は 1〜1000。
   "svt_av1_encode_params.intra_period_length": {
-    "min": -1,
+    "min": 1,
     "max": 1000
   },
   "svt_av1_encode_params.hierarchical_levels": {
-    "min": 2,
+    "min": 0,
     "max": 5
   },
-  "svt_av1_encode_params.pred_structure": [
-    1,
-    2
-  ],
   "svt_av1_encode_params.scene_change_detection": [
     true,
     false
   ],
+  // 指定可能範囲は 0 以上 (u32 に収まる値)。探索は 0〜120。
   "svt_av1_encode_params.look_ahead_distance": {
     "min": 0,
     "max": 120
   },
   "svt_av1_encode_params.aq_mode": {
     "min": 0,
-    "max": 4
+    "max": 2
   },
   "svt_av1_encode_params.sharpness": {
-    "min": -1,
-    "max": 5
+    "min": -7,
+    "max": 7
   },
   "svt_av1_encode_params.rtc": [
     true,
@@ -203,36 +221,38 @@
   "svt_av1_encode_params.tune": [
     "vq",
     "psnr",
-    "ssim"
+    "ssim",
+    "iq",
+    "ms_ssim"
   ],
   "svt_av1_encode_params.screen_content_mode": {
     "min": 0,
-    "max": 2
+    "max": 3
   },
   "svt_av1_encode_params.tile_columns": {
     "min": 1,
-    "max": 6
+    "max": 4
   },
   "svt_av1_encode_params.tile_rows": {
     "min": 1,
     "max": 6
   },
-  "svt_av1_encode_params.enable_dlf_flag": [
-    true,
-    false
-  ],
+  "svt_av1_encode_params.enable_dlf_flag": {
+    "min": 0,
+    "max": 2
+  },
   "svt_av1_encode_params.cdef_level": {
     "min": -1,
     "max": 4
   },
-  "svt_av1_encode_params.enable_restoration_filtering": [
-    true,
-    false
-  ],
-  "svt_av1_encode_params.enable_tf": [
-    true,
-    false
-  ],
+  "svt_av1_encode_params.enable_restoration_filtering": {
+    "min": -1,
+    "max": 1
+  },
+  "svt_av1_encode_params.enable_tf": {
+    "min": 0,
+    "max": 2
+  },
   "svt_av1_encode_params.enable_overlays": [
     true,
     false
@@ -265,10 +285,10 @@
     true,
     false
   ],
-  "svt_av1_encode_params.fast_decode": [
-    true,
-    false
-  ],
+  "svt_av1_encode_params.fast_decode": {
+    "min": 0,
+    "max": 2
+  },
   "openh264_encode_params.thread_count": {
     "min": 1,
     "max": 16
@@ -304,10 +324,12 @@
     "bitrate",
     "timestamp"
   ],
+  // 指定可能範囲は 1〜51。探索は上限側の 30〜51。
   "openh264_encode_params.max_qp": {
     "min": 30,
     "max": 51
   },
+  // 指定可能範囲は 1〜51。探索は下限側の 1〜28。
   "openh264_encode_params.min_qp": {
     "min": 1,
     "max": 28
@@ -417,6 +439,7 @@
     "vbr",
     "cbr"
   ],
+  // 指定可能範囲は正の整数。探索は 1〜600。H.265 / AV1 の同名キーも同じ。
   "nvcodec_h264_encode_params.gop_length": {
     "min": 1,
     "max": 600
