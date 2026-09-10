@@ -1,4 +1,4 @@
-# Hisui 2025.3.3 から Sora Archive Compositor への移行
+# Hisui から Sora Archive Compositor への移行方法
 
 このドキュメントでは、以下のバージョン間の移行方法を説明します。
 
@@ -7,8 +7,6 @@
 
 このドキュメントは上記のバージョン間の差分を記録したスナップショットです。
 移行先より新しいバージョンの変更については [`CHANGES.md`](../CHANGES.md) を参照してください。
-
-なお、[レガシー版 Hisui からのマイグレーションガイド](https://github.com/shiguredo/hisui/blob/2025.3.3/docs/migrate_hisui_legacy.md) は、C++ 版のレガシー Hisui から Rust 版 Hisui への移行を対象とした別のドキュメントです。
 
 ## 互換性の概要
 
@@ -25,27 +23,19 @@ Sora Archive Compositor は、Hisui 2025.3.3 の Sora 録画合成機能を引�
 一方で、移行時には主に以下の変更への対応が必要です。
 
 - バイナリ名と環境変数名の変更
-- `tune` のオプション、試行回数の意味、探索履歴形式の変更
-- `vmaf` のオプションと出力項目の削除
 - FDK-AAC 共有ライブラリの指定方法の変更
-- Cargo フィーチャーと Rust の最小サポートバージョンの変更
 - H.265 の MP4 出力に使用するサンプルエントリーの変更
 - ログの時刻表現と色付けの変更
-- `pipeline` の除外と配布方法の変更
+- 配布方法の変更
 
 ## 最短の移行手順
 
 1. `hisui` バイナリを `sora-archive-compositor` バイナリへ置き換える
 2. コマンドラインやスクリプト内の `hisui` を `sora-archive-compositor` に置き換える
 3. `HISUI_*` 環境変数を `SORA_ARCHIVE_COMPOSITOR_*` 環境変数へ置き換える
-4. `tune` を利用している場合は、`--study-name` を `--name` に変更し、`--trial-count` には既存履歴を含む目標の合計試行回数を指定する
-5. `tune` を利用している場合は、`optuna.db` を引き継がず、新しい JSON Lines 形式で探索を開始する
-6. `vmaf` を利用している場合は、`--vmaf-output-file` の指定と `vmaf_output_file_path` の参照を削除する
-7. FDK-AAC を利用している場合は、共有ライブラリのパスをコマンドライン引数または環境変数で指定する
-8. Cargo でビルドしている場合は、Rust 1.98 以降を使い、`libvpx` フィーチャーの指定を外す
-9. `pipeline` を利用している場合は、ワークフローを別のツールまたは独自実装へ移す
-10. Docker イメージを利用している場合は、[配布物](#配布物) を確認し、Docker イメージが提供されるまではビルド済みバイナリまたは自前でビルドしたバイナリへ切り替える
-11. H.265 の MP4、VMAF の JSON、ログを処理する連携先がある場合は、出力形式の変更に対応する
+4. FDK-AAC を利用している場合は、共有ライブラリのパスをコマンドライン引数または環境変数で指定する
+5. Docker イメージを利用している場合は、[配布物](#配布物) を確認し、Docker イメージが提供されるまではビルド済みバイナリまたは自前でビルドしたバイナリへ切り替える
+6. H.265 の MP4 またはログを処理する連携先がある場合は、出力形式の変更に対応する
 
 ## バイナリ名とコマンド
 
@@ -70,10 +60,10 @@ $ sora-archive-compositor compose /path/to/archive/RECORDING_ID/
 ```
 
 `inspect`、`list-codecs`、`compose`、`vmaf`、`tune` のサブコマンド名は変わっていません。
-変更されていないオプションについては、[関連ドキュメント](#関連ドキュメント) を参照してください。
+`compose`、`inspect`、`list-codecs` の変更されていないオプションについては、[関連ドキュメント](#関連ドキュメント) を参照してください。
 
 また、Hisui 2025.3.3 にはないサブコマンドとして `generate-archive` が追加されています。
-これはダミーの録画データを生成するコマンドで、実録画がなくても `compose` や `tune` を試すために利用できます。
+これはダミーの録画データを生成するコマンドで、実録画がなくても `compose` を試すために利用できます。
 詳細は [generate-archive コマンド](command_generate_archive.md) を参照してください。
 
 ## 環境変数
@@ -88,9 +78,6 @@ Hisui 2025.3.3 から引き継がれた環境変数は、接頭辞が `HISUI_*` 
 | `HISUI_THREAD_COUNT` | `SORA_ARCHIVE_COMPOSITOR_THREAD_COUNT` | `compose` |
 | `HISUI_SYNC_CHANNEL_SIZE` | `SORA_ARCHIVE_COMPOSITOR_SYNC_CHANNEL_SIZE` | `compose`、`inspect`、`vmaf` |
 
-`HISUI_MAX_CPU_CORES` に対応する環境変数はありません。`--max-cpu-cores` とともに削除されました。
-詳細は [`tune` の変更点](#tune-の変更点) と [`vmaf` の変更点](#vmaf-の変更点) を参照してください。
-
 `SORA_ARCHIVE_COMPOSITOR_SYNC_CHANNEL_SIZE` は隠し設定で、デフォルト値は `10` です。
 `inspect` では、`--decode` の有無にかかわらず利用されます。
 
@@ -104,82 +91,6 @@ FDK-AAC を有効にしたビルドでは、共有ライブラリのパスを指
 
 標準出力 JSON と `--stats-file` で保存する統計情報 JSON のスキーマは互換です。
 H.265 の MP4 出力については、[入力ファイルと出力ファイル](#入力ファイルと出力ファイル) を参照してください。
-
-## `tune` の変更点
-
-`tune` は外部の Optuna を使う方式から、Sora Archive Compositor に組み込まれた NSGA-II を使う方式へ変わりました。
-Python と `optuna` 実行ファイルは不要です。
-
-### オプションと試行回数
-
-| 項目 | Hisui 2025.3.3 | Sora Archive Compositor |
-|---|---|---|
-| 探索名 | `--study-name` | `--name` |
-| `--trial-count` の意味 | 今回追加する試行回数 | 既存履歴を含む目標の合計試行回数 |
-
-たとえば、100 回の試行が完了した履歴に対して `--trial-count 150` を指定すると、追加で 50 回試行します。
-
-`--max-cpu-cores` (`-c`) と環境変数 `HISUI_MAX_CPU_CORES` / `SORA_ARCHIVE_COMPOSITOR_MAX_CPU_CORES` はありません。指定すると未知オプションとして拒否されます。
-
-### 探索履歴
-
-探索履歴の保存形式とファイル名が変わりました。
-
-| Hisui 2025.3.3 | Sora Archive Compositor |
-|---|---|
-| `<tune-working-dir>/optuna.db` | `<tune-working-dir>/<name>.jsonl` |
-| Optuna の SQLite データベース | 1 トライアルを 1 行で記録する JSON Lines |
-
-`optuna.db` は引き継げません。
-移行後は JSON Lines 形式で探索を新たに開始してください。
-
-探索中は多重起動を防ぐ `<name>.lock` も作成されます。
-中断によってロックファイルが残った場合は、次回起動時に自動で回収されるため、手動で削除する必要はありません。
-Hisui 2025.3.3 のデフォルト作業ディレクトリは `ROOT_DIR/hisui-tune/`、探索名は `hisui-tune` です。
-Sora Archive Compositor のデフォルト作業ディレクトリは `ROOT_DIR/tune/`、探索名は `tune` です。
-既存の `hisui-tune/` は自動では読みません。
-
-各トライアルディレクトリには `vmaf-output.json` が作成されなくなりました。
-`layout.jsonc` と `metrics.json` は引き続き作成され、評価用の `reference.yuv` と `distorted.yuv` は評価後に削除されます。
-
-### ログと子プロセス
-
-起動時の `INFO` ブロックに含まれるキー名が変わりました。
-
-| Hisui 2025.3.3 | Sora Archive Compositor |
-|---|---|
-| `optuna storage:` | `trials file:` |
-| `optuna study name:` | `name:` |
-| `optuna trial count:` | `target total trials:` |
-
-古いキー名を CI や監視で検出している場合は、新しいキー名に変更してください。
-Optuna が標準エラー出力へ出力していたログ行も出力されません。
-Optuna のログ行を成功条件として検出している場合は、その条件を削除してください。
-
-各トライアルの評価では、実行中の Sora Archive Compositor バイナリから `vmaf` サブコマンドを起動します。
-`PATH` 上に `hisui` バイナリを配置する必要はありません。
-
-## `vmaf` の変更点
-
-VMAF の計算は Sora Archive Compositor に組み込まれました。
-外部の `vmaf` 実行ファイルは不要です。
-外部の `vmaf` が出力していたバージョン情報などのログ行も出力されません。
-
-以下のオプション、出力項目、生成物がなくなりました。
-
-- `--vmaf-output-file` オプション
-- `--max-cpu-cores` (`-c`) オプションと `HISUI_MAX_CPU_CORES` に対応する環境変数
-- 標準出力 JSON の `vmaf_output_file_path`
-- 中間生成物の `vmaf-output.json`
-
-標準出力 JSON の以下の VMAF スコアは引き続き出力されます。
-
-- `vmaf_min`
-- `vmaf_max`
-- `vmaf_mean`
-- `vmaf_harmonic_mean`
-
-`reference_yuv_file_path` と `distorted_yuv_file_path` も引き続き出力されます。
 
 ## FDK-AAC の利用方法
 
@@ -214,7 +125,7 @@ Hisui 2025.3.3 を macOS で `--features fdk-aac` によりビルドしていた
 デフォルト構成で自動的に有効になる Apple Audio Toolbox の AAC エンコードへ切り替えてください。
 ビルド手順については [FDK-AAC を使った AAC エンコードを有効にする場合](build.md#fdk-aac-を使った-aac-エンコードを有効にする場合) を参照してください。
 
-## レイアウト JSONC と探索設定
+## レイアウト JSONC
 
 Hisui 2025.3.3 と Sora Archive Compositor では、レイアウト JSONC の外側のスキーマは同じです。
 ただし、`*_encode_params` と `*_decode_params` で指定できるパラメーターには互換性のない変更があります。
@@ -284,13 +195,10 @@ SVT-AV1 では、以下のパラメーターが追加されました。
 すべての nvcodec デコーダーに `reconfigure_enabled` が追加されました。
 既定値は `false` です。
 
-### デフォルトレイアウトと探索空間
+### デフォルトレイアウト
 
 `layout-examples/compose-default.jsonc` の数値は Hisui 2025.3.3 から変更していません。
 エンコード / デコード設定には、廃止されたパラメーターの削除と nvcodec デコーダーへの `"reconfigure_enabled": false` の追加だけを反映しており、既定値のチューニングは実施していません。
-
-Hisui 2025.3.3 の `tune` 用レイアウトと探索空間をそのまま引き継がず、Sora Archive Compositor の `layout-examples/` と `search-space-examples/full.jsonc` を基に移行してください。
-Sora Archive Compositor の探索空間は、廃止されたパラメーターと指定できない値を除外し、探索対象に含めるパラメーターの範囲を現在の実装に合わせています。
 
 レイアウト全体については [レイアウト機能](layout.md) と [レイアウト JSON の仕様](layout_spec.md) を参照してください。
 
@@ -303,34 +211,6 @@ H.265 の MP4 出力に使用するサンプルエントリーは、`hev1` か�
 
 `compose`、`inspect`、`list-codecs` の標準出力 JSON と `compose` の統計情報 JSON はスキーマ互換です。
 ただし、`list-codecs` の `engines[].build_version` は依存クレートの更新に伴って数値が変わる場合があります。
-
-`tune` と `vmaf` の生成物については、[`tune` の変更点](#tune-の変更点) と [`vmaf` の変更点](#vmaf-の変更点) を参照してください。
-
-## Cargo フィーチャーとプラットフォーム
-
-### Rust の最小サポートバージョン
-
-ビルドに必要な Rust のバージョンは 1.90 から 1.98 に変わりました。
-Rust 1.98 以降を利用してください。
-
-### `libvpx` フィーチャー
-
-Hisui 2025.3.3 では `libvpx` がデフォルトフィーチャーでした。
-Sora Archive Compositor では `libvpx` フィーチャーがなくなり、`libvpx` が常に有効になりました。
-
-- `--features libvpx` を明示していた場合は指定を外す
-- `--no-default-features` で `libvpx` を無効にしていた場合は、無効化できなくなったためビルド構成を見直す
-
-`--features libvpx` を残すと、存在しないフィーチャーの指定として Cargo のビルドが失敗します。
-
-### `nvcodec` フィーチャー
-
-`nvcodec` フィーチャーは同じ名前で引き続き利用できます。
-
-### `fdk-aac` フィーチャー
-
-`fdk-aac` フィーチャーは同じ名前で引き続き利用できますが、Sora Archive Compositor では Ubuntu 向けです。
-共有ライブラリの指定方法については [FDK-AAC の利用方法](#fdk-aac-の利用方法) を参照してください。
 
 ## ログ形式
 
@@ -353,16 +233,7 @@ Sora Archive Compositor では `libvpx` フィーチャーがなくなり、`lib
 NO_COLOR=1 sora-archive-compositor compose /path/to/archive/RECORDING_ID/
 ```
 
-## 利用できない機能と配布物
-
-### `pipeline` サブコマンド
-
-Hisui 2025.3.3 の実験的な `pipeline` サブコマンドは、Sora Archive Compositor には移植されていません。
-`pipeline-examples` と `plugin-examples` に含まれていたサンプルも利用できません。
-
-`sora_source.py` と `sora_publish.py` は `pipeline` 用のプラグイン例であり、独立した CLI サブコマンドではありません。
-
-### 配布物
+## 配布物
 
 このドキュメントの更新時点では、Sora Archive Compositor 2026.1.0 は未リリースです。
 以下の配布物と経路は利用できません。
@@ -384,7 +255,5 @@ Hisui 2025.3.3 の実験的な `pipeline` サブコマンドは、Sora Archive C
 - [`sora-archive-compositor generate-archive` コマンド](command_generate_archive.md)
 - [`sora-archive-compositor inspect` コマンド（開発者向け）](command_inspect.md)
 - [`sora-archive-compositor list-codecs` コマンド](command_list_codecs.md)
-- [`sora-archive-compositor tune` コマンド](command_tune.md)
-- [`sora-archive-compositor vmaf` コマンド](command_vmaf.md)
 - [レイアウト機能](layout.md)
 - [レイアウト JSON の仕様](layout_spec.md)
