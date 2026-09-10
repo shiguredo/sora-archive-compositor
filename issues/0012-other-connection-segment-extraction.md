@@ -1,7 +1,7 @@
 # 特定のコネクション ID が参加している間の映像を切り出す方法を確認する
 
 - Created: 2026-09-10
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-10
 - Branch: feature/other-connection-segment-extraction
 - Polished: {YYYY-MM-DD}
 
@@ -15,3 +15,7 @@ Hisui の Sora 録画合成機能に対する要望として、特定のコネ�
 - 同じ `connection_id` の分割録画は 1 つのソースとして扱われ、表示区間は `start_time_offset` と `stop_time_offset` から決まる (`src/layout.rs` の `AggregatedSourceInfo`)
 - `trim` (既定有効) により、ソースが存在しない区間は合成結果から除去される (`src/layout.rs` の `decide_trim_spans`)
 - 冒頭でソースが存在しない区間は `trim` の値に関わらず常に除去される
+
+## 解決方法
+
+対象コネクションの archive JSON だけを `audio_sources` と `video_layout.$REGION_NAME.video_sources` に指定すれば、そのコネクションの映像が存在する区間だけが合成結果に残る。`trim` が既定で有効なため、存在しない区間は自動的に除去される。コード変更は不要であり、既存機能で実現できることを確認して closed にする。
