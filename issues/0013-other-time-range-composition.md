@@ -1,7 +1,7 @@
 # 時間指定した範囲だけの合成方法を確認する
 
 - Created: 2026-09-10
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-10
 - Branch: feature/other-time-range-composition
 - Polished: {YYYY-MM-DD}
 
