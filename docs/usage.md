@@ -2,7 +2,7 @@
 
 まずは Sora Archive Compositor を使って録画データの合成をしてみましょう。
 
-Hisui 2025.3.2 から移行する場合は、[Hisui 2025.3.2 から Sora Archive Compositor への移行](migration_from_hisui_2025_3_2.md) を参照してください。
+Hisui 2025.3.3 から移行する場合は、[Hisui 2025.3.3 から Sora Archive Compositor への移行](migration_from_hisui_2025_3_3.md) を参照してください。
 
 ## ビルドして合成する
 

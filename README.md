@@ -22,7 +22,7 @@ Sora が出力した録画ファイル (MP4 または WebM) を合成し、単�
 
 もともと [Recording Composition Tool Hisui](https://github.com/shiguredo/hisui) の Sora 録画合成機能として実装されていた部分を、独立したツールとして切り出したものです。
 
-Hisui 2025.3.2 から移行する場合は、[Hisui 2025.3.2 から Sora Archive Compositor への移行](docs/migration_from_hisui_2025_3_2.md) を参照してください。
+Hisui 2025.3.3 から移行する場合は、[Hisui 2025.3.3 から Sora Archive Compositor への移行](docs/migration_from_hisui_2025_3_3.md) を参照してください。
 
 ## 特徴
 
@@ -115,7 +115,7 @@ Sora Archive Compositor リポジトリには、合成やパラメーター調�
 | [usage.md](docs/usage.md) | 利用手順の概要 |
 | [build.md](docs/build.md) | ビルド方法 |
 | [layout.md](docs/layout.md) | レイアウト機能 |
-| [migration_from_hisui_2025_3_2.md](docs/migration_from_hisui_2025_3_2.md) | Hisui 2025.3.2 からの移行 |
+| [migration_from_hisui_2025_3_3.md](docs/migration_from_hisui_2025_3_3.md) | Hisui 2025.3.3 からの移行 |
 | [CHANGES.md](CHANGES.md) | 変更履歴 |
 
 ## 対応 Sora

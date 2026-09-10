@@ -1,19 +1,18 @@
-# Hisui 2025.3.2 から Sora Archive Compositor への移行
+# Hisui 2025.3.3 から Sora Archive Compositor への移行
 
 このドキュメントでは、以下のバージョン間の移行方法を説明します。
 
-- 移行元: Recording Composition Tool Hisui 2025.3.2
-- 移行先: Sora Archive Compositor 2026.1.0-canary.0
+- 移行元：Recording Composition Tool Hisui 2025.3.3
+- 移行先：Sora Archive Compositor 2026.1.0
 
 このドキュメントは上記のバージョン間の差分を記録したスナップショットです。
 移行先より新しいバージョンの変更については [`CHANGES.md`](../CHANGES.md) を参照してください。
 
-なお、[レガシー版 Hisui からのマイグレーションガイド](https://github.com/shiguredo/hisui/blob/2025.3.2/docs/migrate_hisui_legacy.md) は、
-C++ 版のレガシー Hisui から Rust 版 Hisui への移行を対象とした別のドキュメントです。
+なお、[レガシー版 Hisui からのマイグレーションガイド](https://github.com/shiguredo/hisui/blob/2025.3.3/docs/migrate_hisui_legacy.md) は、C++ 版のレガシー Hisui から Rust 版 Hisui への移行を対象とした別のドキュメントです。
 
 ## 互換性の概要
 
-Sora Archive Compositor は、Hisui 2025.3.2 の Sora 録画合成機能を引き継いでいます。
+Sora Archive Compositor は、Hisui 2025.3.3 の Sora 録画合成機能を引き継いでいます。
 以下の 5 つのサブコマンドは引き続き利用できます。
 
 - `compose`
@@ -22,7 +21,7 @@ Sora Archive Compositor は、Hisui 2025.3.2 の Sora 録画合成機能を引�
 - `tune`
 - `vmaf`
 
-レイアウト JSONC のスキーマ、`compose`、`inspect`、`list-codecs` の標準出力 JSON、`compose` の統計情報 JSON は互換です。
+レイアウト JSONC の基本構造、`compose`、`inspect`、`list-codecs` の標準出力 JSON、`compose` の統計情報 JSON は互換です。
 一方で、移行時には主に以下の変更への対応が必要です。
 
 - バイナリ名と環境変数名の変更
@@ -32,7 +31,7 @@ Sora Archive Compositor は、Hisui 2025.3.2 の Sora 録画合成機能を引�
 - Cargo フィーチャーと Rust の最小サポートバージョンの変更
 - H.265 の MP4 出力に使用するサンプルエントリーの変更
 - ログの時刻表現と色付けの変更
-- `pipeline` の除外と Docker イメージの未提供
+- `pipeline` の除外と配布方法の変更
 
 ## 最短の移行手順
 
@@ -43,27 +42,27 @@ Sora Archive Compositor は、Hisui 2025.3.2 の Sora 録画合成機能を引�
 5. `tune` を利用している場合は、`optuna.db` を引き継がず、新しい JSON Lines 形式で探索を開始する
 6. `vmaf` を利用している場合は、`--vmaf-output-file` の指定と `vmaf_output_file_path` の参照を削除する
 7. FDK-AAC を利用している場合は、共有ライブラリのパスをコマンドライン引数または環境変数で指定する
-8. Cargo でビルドしている場合は、Rust 1.95 以降を使い、`libvpx` フィーチャーの指定を外す
+8. Cargo でビルドしている場合は、Rust 1.98 以降を使い、`libvpx` フィーチャーの指定を外す
 9. `pipeline` を利用している場合は、ワークフローを別のツールまたは独自実装へ移す
-10. Docker イメージを利用している場合は、ビルド済みバイナリまたは自前でビルドしたバイナリへ切り替える
+10. Docker イメージを利用している場合は、[配布物](#配布物) を確認し、Docker イメージが提供されるまではビルド済みバイナリまたは自前でビルドしたバイナリへ切り替える
 11. H.265 の MP4、VMAF の JSON、ログを処理する連携先がある場合は、出力形式の変更に対応する
 
 ## バイナリ名とコマンド
 
 プロジェクト名、Cargo パッケージ名、バイナリ名が変わりました。
 
-| 項目 | Hisui 2025.3.2 | Sora Archive Compositor 2026.1.0-canary.0 |
+| 項目 | Hisui 2025.3.3 | Sora Archive Compositor 2026.1.0 |
 |---|---|---|
 | プロジェクト名 | Recording Composition Tool Hisui | Sora Archive Compositor |
 | Cargo パッケージ名 | `hisui` | `sora-archive-compositor` |
 | バイナリ名 | `hisui` | `sora-archive-compositor` |
-| バージョン表示 | `hisui 2025.3.2` | `sora-archive-compositor 2026.1.0-canary.0` |
+| バージョン表示 | `hisui 2025.3.3` | `sora-archive-compositor 2026.1.0` |
 | リポジトリ | `github.com/shiguredo/hisui` | `github.com/shiguredo/sora-archive-compositor` |
 
 たとえば、次のコマンドはバイナリ名だけを置き換えて実行できます。
 
 ```console
-# Hisui 2025.3.2
+# Hisui 2025.3.3
 $ hisui compose /path/to/archive/RECORDING_ID/
 
 # Sora Archive Compositor
@@ -73,16 +72,16 @@ $ sora-archive-compositor compose /path/to/archive/RECORDING_ID/
 `inspect`、`list-codecs`、`compose`、`vmaf`、`tune` のサブコマンド名は変わっていません。
 変更されていないオプションについては、[関連ドキュメント](#関連ドキュメント) を参照してください。
 
-また、Hisui 2025.3.2 にはないサブコマンドとして `generate-archive` が追加されています。
+また、Hisui 2025.3.3 にはないサブコマンドとして `generate-archive` が追加されています。
 これはダミーの録画データを生成するコマンドで、実録画がなくても `compose` や `tune` を試すために利用できます。
 詳細は [generate-archive コマンド](command_generate_archive.md) を参照してください。
 
 ## 環境変数
 
-Hisui 2025.3.2 の `HISUI_*` 環境変数は、すべて `SORA_ARCHIVE_COMPOSITOR_*` に変わりました。
+Hisui 2025.3.3 から引き継がれた環境変数は、接頭辞が `HISUI_*` から `SORA_ARCHIVE_COMPOSITOR_*` に変わりました。
 古い環境変数名は Sora Archive Compositor では利用できません。
 
-| Hisui 2025.3.2 | Sora Archive Compositor | 対象 |
+| Hisui 2025.3.3 | Sora Archive Compositor | 対象 |
 |---|---|---|
 | `HISUI_LAYOUT_FILE_PATH` | `SORA_ARCHIVE_COMPOSITOR_LAYOUT_FILE_PATH` | `compose`、`vmaf` |
 | `HISUI_OPENH264_PATH` | `SORA_ARCHIVE_COMPOSITOR_OPENH264_PATH` | `compose`、`inspect`、`list-codecs`、`tune`、`vmaf` |
@@ -113,7 +112,7 @@ Python と `optuna` 実行ファイルは不要です。
 
 ### オプションと試行回数
 
-| 項目 | Hisui 2025.3.2 | Sora Archive Compositor |
+| 項目 | Hisui 2025.3.3 | Sora Archive Compositor |
 |---|---|---|
 | 探索名 | `--study-name` | `--name` |
 | `--trial-count` の意味 | 今回追加する試行回数 | 既存履歴を含む目標の合計試行回数 |
@@ -126,7 +125,7 @@ Python と `optuna` 実行ファイルは不要です。
 
 探索履歴の保存形式とファイル名が変わりました。
 
-| Hisui 2025.3.2 | Sora Archive Compositor |
+| Hisui 2025.3.3 | Sora Archive Compositor |
 |---|---|
 | `<tune-working-dir>/optuna.db` | `<tune-working-dir>/<name>.jsonl` |
 | Optuna の SQLite データベース | 1 トライアルを 1 行で記録する JSON Lines |
@@ -136,7 +135,7 @@ Python と `optuna` 実行ファイルは不要です。
 
 探索中は多重起動を防ぐ `<name>.lock` も作成されます。
 中断によってロックファイルが残った場合は、次回起動時に自動で回収されるため、手動で削除する必要はありません。
-Hisui 2025.3.2 のデフォルト作業ディレクトリは `ROOT_DIR/hisui-tune/`、探索名は `hisui-tune` です。
+Hisui 2025.3.3 のデフォルト作業ディレクトリは `ROOT_DIR/hisui-tune/`、探索名は `hisui-tune` です。
 Sora Archive Compositor のデフォルト作業ディレクトリは `ROOT_DIR/tune/`、探索名は `tune` です。
 既存の `hisui-tune/` は自動では読みません。
 
@@ -147,7 +146,7 @@ Sora Archive Compositor のデフォルト作業ディレクトリは `ROOT_DIR/
 
 起動時の `INFO` ブロックに含まれるキー名が変わりました。
 
-| Hisui 2025.3.2 | Sora Archive Compositor |
+| Hisui 2025.3.3 | Sora Archive Compositor |
 |---|---|
 | `optuna storage:` | `trials file:` |
 | `optuna study name:` | `name:` |
@@ -169,7 +168,7 @@ VMAF の計算は Sora Archive Compositor に組み込まれました。
 以下のオプション、出力項目、生成物がなくなりました。
 
 - `--vmaf-output-file` オプション
-- `--max-cpu-cores` (`-c`) オプションと `SORA_ARCHIVE_COMPOSITOR_MAX_CPU_CORES` 環境変数
+- `--max-cpu-cores` (`-c`) オプションと `HISUI_MAX_CPU_CORES` に対応する環境変数
 - 標準出力 JSON の `vmaf_output_file_path`
 - 中間生成物の `vmaf-output.json`
 
@@ -186,7 +185,7 @@ VMAF の計算は Sora Archive Compositor に組み込まれました。
 
 FDK-AAC の共有ライブラリを読み込む方法が変わりました。
 
-| Hisui 2025.3.2 | Sora Archive Compositor |
+| Hisui 2025.3.3 | Sora Archive Compositor |
 |---|---|
 | ビルド時にシステム標準パスの共有ライブラリへ動的リンク | 実行時にユーザーが指定したパスから共有ライブラリをロード |
 
@@ -211,34 +210,93 @@ SORA_ARCHIVE_COMPOSITOR_FDK_AAC_PATH=/path/to/libfdk-aac.so \
 ```
 
 Sora Archive Compositor の `fdk-aac` フィーチャーは Ubuntu 向けです。
-Hisui 2025.3.2 を macOS で `--features fdk-aac` によりビルドしていた場合は、
+Hisui 2025.3.3 を macOS で `--features fdk-aac` によりビルドしていた場合は、
 デフォルト構成で自動的に有効になる Apple Audio Toolbox の AAC エンコードへ切り替えてください。
-ビルド手順については
-[FDK-AAC を使った AAC エンコードを有効にする場合](build.md#fdk-aac-を使った-aac-エンコードを有効にする場合)
-を参照してください。
+ビルド手順については [FDK-AAC を使った AAC エンコードを有効にする場合](build.md#fdk-aac-を使った-aac-エンコードを有効にする場合) を参照してください。
 
 ## レイアウト JSONC と探索設定
 
-Hisui 2025.3.2 と Sora Archive Compositor のレイアウト JSONC スキーマは同じです。
-追加、削除、名称変更されたフィールドはありません。
-既存のレイアウト JSONC はそのまま利用できます。
+Hisui 2025.3.3 と Sora Archive Compositor では、レイアウト JSONC の外側のスキーマは同じです。
+ただし、`*_encode_params` と `*_decode_params` で指定できるパラメーターには互換性のない変更があります。
+既存のレイアウトを移行する場合は、以下の差分を確認してください。
 
-ただし、`*_encode_params` オブジェクト内で指定可能なエンコードパラメーターは依存する `shiguredo_*` crate の更新に伴って変更されています。
+指定可能なパラメーターの範囲と意味は、[エンコードパラメーター](layout_encode_params.md) と [デコードパラメーター](layout_decode_params.md) を参照してください。
+Sora Archive Compositor は、未知のエンコードパラメーターを無視し、`ignored unknown ... encode param: ...` 形式の警告ログを出力します。
 
-- `svt_av1_encode_params` に多くのパラメーターが追加されました (HDR 系、レート制御の詳細設定、スーパーレゾリューション、量子化マトリクスなど)。詳細は [エンコードパラメーター](layout_encode_params.md) を参照してください。
-- 廃止されたパラメーターは、指定しても無視され、警告ログ (`ignored unknown ... encode param: ...`) が出力されます。
-  - svt-av1 で廃止された主なパラメーター: `pred_structure` / `pin_threads` / `target_socket` / `enable_tpl_la` / `force_key_frames` / `recon_enabled` / `tier`
-- 指定可能なパラメーターの一覧は [エンコードパラメーター](layout_encode_params.md) に記載されています。パラメーター名の typo などに気付けるよう、未知のキーが警告されるようになりました。
+### libvpx と nvcodec のエンコードパラメーター
 
-Hisui 2025.3.2 の `tune` 用レイアウト例と探索空間も互換です。
-ただし、`search-space-examples/full.jsonc` の探索空間は上記のパラメーター変更に合わせて更新されています。
+libvpx と nvcodec では、Hisui 2025.3.3 から公開 JSON キーは増減していません。
 
-詳細については [レイアウト機能](layout.md) と [レイアウト JSON の仕様](layout_spec.md) を参照してください。
+### OpenH264 のエンコードパラメーター
+
+OpenH264 では、`entropy_coding` が `entropy_coding_mode` に変わり、値も真偽値から `"cavlc"` / `"cabac"` に変わりました。
+互換性のため、従来の `entropy_coding` も引き続き利用できます。
+`"entropy_coding": false` は `"entropy_coding_mode": "cavlc"`、`"entropy_coding": true` は `"entropy_coding_mode": "cabac"` と同じ意味です。
+
+### SVT-AV1 のエンコードパラメーター
+
+SVT-AV1 では、以下のパラメーターが追加されました。
+
+- 品質と速度：`aq_mode` / `sharpness` / `rtc` / `tune` / `intra_refresh_type` / `screen_content_mode` / `lossless` / `ac_bias` / `level_of_parallelism`
+- レート制御：`vbr_min_section_pct` / `vbr_max_section_pct` / `mbr_over_shoot_pct` / `recode_loop` / `starting_buffer_level_ms` / `optimal_buffer_level_ms` / `maximum_buffer_size_ms`
+- GOP とフレーム構造：`sframe_dist` / `sframe_mode` / `sframe_qp` / `sframe_qp_offset` / `gop_constraint_rc` / `multiply_keyint`
+- スーパーレゾリューションとリサイズ：`superres_mode` / `superres_denom` / `superres_kf_denom` / `superres_qthres` / `superres_kf_qthres` / `superres_auto_search_type` / `resize_mode` / `resize_denom` / `resize_kf_denom`
+- フィルタリング：`tf_strength` / `enable_variance_boost` / `variance_boost_strength` / `variance_octile` / `variance_boost_curve` / `film_grain_denoise_apply` / `adaptive_film_grain`
+- 量子化と高度な設定：`enable_qm` / `min_qm_level` / `max_qm_level` / `min_chroma_qm_level` / `max_chroma_qm_level` / `max_tx_size` / `enable_mfmv` / `enable_dg` / `avif` / `startup_mg_size` / `startup_qp_offset` / `luminance_qp_bias` / `qp_scale_compress_strength` / `extended_crf_qindex_offset`
+- HDR：`color_primaries` / `transfer_characteristics` / `matrix_coefficients` / `color_range` / `chroma_sample_position` / `mastering_display` / `content_light_level`
+
+以下のパラメーターは廃止されました。
+指定しても無視され、警告ログが出力されます。
+
+- `pred_structure`
+- `pin_threads`
+- `target_socket`
+- `enable_tpl_la`
+- `force_key_frames`
+- `recon_enabled`
+- `encoder_bit_depth`
+- `encoder_color_format`
+- `profile`
+- `level`
+- `tier`
+
+`encoder_color_format` は単純に名称を置き換えられません。
+新しい `color_format` を利用し、値も移行してください。
+指定可能な値は `"i420"` / `"i42010"` です。
+
+`enable_dlf_flag`、`enable_tf`、`fast_decode`、`enable_restoration_filtering` は真偽値から整数値に変わりました。
+これらのパラメーターでは、従来の真偽値も互換性のために受け付けます。
+`cdef_level` の整数型は `i8` から `i32` に変わり、真偽値も受け付けます。
+
+`intra_period_length` に `-1` は指定できません。
+1 以上の値を指定するか、省略してデフォルト値の `300` を利用してください。
+
+### Video Toolbox のエンコードパラメーター
+
+`data_rate_limits` が追加され、H.264 / H.265 のデータレート上限を指定できるようになりました。
+`allow_frame_reordering` は、Hisui 2025.3.3 では設定に反映されませんでしたが、Sora Archive Compositor では H.264 / H.265 の設定に反映されます。
+`use_parallelization` は廃止され、指定しても無視されます。
+`allow_open_gop` は H.264 では廃止され、H.265 では引き続き利用できます。
+内部 API では `prioritize_speed_over_quality` が名称変更されましたが、レイアウト JSONC では従来の `prioritize_speed_over_quality` を引き続き利用できます。
+
+### nvcodec のデコードパラメーター
+
+すべての nvcodec デコーダーに `reconfigure_enabled` が追加されました。
+既定値は `false` です。
+
+### デフォルトレイアウトと探索空間
+
+`layout-examples/compose-default.jsonc` の数値は Hisui 2025.3.3 から変更していません。
+エンコード / デコード設定には、廃止されたパラメーターの削除と nvcodec デコーダーへの `"reconfigure_enabled": false` の追加だけを反映しており、既定値のチューニングは実施していません。
+
+Hisui 2025.3.3 の `tune` 用レイアウトと探索空間をそのまま引き継がず、Sora Archive Compositor の `layout-examples/` と `search-space-examples/full.jsonc` を基に移行してください。
+Sora Archive Compositor の探索空間は、廃止されたパラメーターと指定できない値を除外し、探索対象に含めるパラメーターの範囲を現在の実装に合わせています。
+
+レイアウト全体については [レイアウト機能](layout.md) と [レイアウト JSON の仕様](layout_spec.md) を参照してください。
 
 ## 入力ファイルと出力ファイル
 
-H.265 の MP4 入力では、従来の `hev1` に加えて `hvc1` サンプルエントリーも読み込めるようになりました。
-これは入力対応の拡張であり、`hev1` の入力も引き続き利用できます。
+Hisui 2025.3.3 と Sora Archive Compositor は、H.265 の MP4 入力で `hev1` と `hvc1` の両方を利用できます。
 
 H.265 の MP4 出力に使用するサンプルエントリーは、`hev1` から `hvc1` に変わりました。
 出力ファイルを処理するシステムがサンプルエントリーを判定している場合は、`hvc1` を受け入れるように変更してください。
@@ -252,12 +310,12 @@ H.265 の MP4 出力に使用するサンプルエントリーは、`hev1` か�
 
 ### Rust の最小サポートバージョン
 
-ビルドに必要な Rust のバージョンは 1.90 から 1.95 に変わりました。
-Rust 1.95 以降を利用してください。
+ビルドに必要な Rust のバージョンは 1.90 から 1.98 に変わりました。
+Rust 1.98 以降を利用してください。
 
 ### `libvpx` フィーチャー
 
-Hisui 2025.3.2 では `libvpx` がデフォルトフィーチャーでした。
+Hisui 2025.3.3 では `libvpx` がデフォルトフィーチャーでした。
 Sora Archive Compositor では `libvpx` フィーチャーがなくなり、`libvpx` が常に有効になりました。
 
 - `--features libvpx` を明示していた場合は指定を外す
@@ -281,7 +339,7 @@ Sora Archive Compositor では `libvpx` フィーチャーがなくなり、`lib
 モジュールパスの接頭辞も、`hisui` から `sora_archive_compositor` に変わりました。
 
 ```text
-# Hisui 2025.3.2
+# Hisui 2025.3.3
 0.123456 [WARN] hisui::module - message
 
 # Sora Archive Compositor
@@ -299,20 +357,24 @@ NO_COLOR=1 sora-archive-compositor compose /path/to/archive/RECORDING_ID/
 
 ### `pipeline` サブコマンド
 
-Hisui 2025.3.2 の実験的な `pipeline` サブコマンドは、Sora Archive Compositor には移植されていません。
+Hisui 2025.3.3 の実験的な `pipeline` サブコマンドは、Sora Archive Compositor には移植されていません。
 `pipeline-examples` と `plugin-examples` に含まれていたサンプルも利用できません。
 
 `sora_source.py` と `sora_publish.py` は `pipeline` 用のプラグイン例であり、独立した CLI サブコマンドではありません。
 
-### Docker イメージと Canary
+### 配布物
 
-Sora Archive Compositor 2026.1.0-canary.0 では、以下の配布物と経路を利用できません。
+このドキュメントの更新時点では、Sora Archive Compositor 2026.1.0 は未リリースです。
+以下の配布物と経路は利用できません。
 
+- GitHub Releases の 2026.1.0 向けビルド済みバイナリ
 - `Dockerfile`
 - `canary.py`
 - `ghcr.io/shiguredo/sora-archive-compositor` の Docker イメージ
+- crates.io の `sora-archive-compositor` パッケージ
 
-ビルド済みバイナリを利用するか、[ビルド方法](build.md) に従ってビルドしてください。
+2026.1.0 のリリースまでは、[ビルド方法](build.md) のリポジトリ指定またはローカルリポジトリの手順に従ってビルドしてください。
+リリース後の提供状況は、[README](../README.md) と [GitHub Releases](https://github.com/shiguredo/sora-archive-compositor/releases) で確認してください。
 
 ## 関連ドキュメント
 

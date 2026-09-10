@@ -33,7 +33,7 @@ Sora が出力した録画ファイル (MP4 または WebM) を合成し、単�
 - メディアファイルのパスは、JSON の拡張子をメディア形式に置き換えたものとして解決される。
 - `ROOT_DIR` の外を参照するパス指定はエラーになる。
 - バイナリは Releases から取得するか、`docs/build.md` の手順でビルドする。
-- Docker イメージは 2026.1.0-canary.0 では提供していない。
+- Docker イメージは現時点では提供していない。
 
 ## 最短フロー
 
@@ -233,7 +233,7 @@ Picture-in-Picture など複数リージョンの例は `docs/layout.md` にあ�
 - `tune` の処理時間は相対比較用である。絶対値はフル尺の `compose` で確認する。
 - トライアル失敗が稀なら継続してよい。頻発する場合は探索空間かビルド・共有ライブラリ指定を疑う。
 - `vmaf` と `tune` の中間 YUV は大容量になる。不要になれば削除する。
-- Hisui からの移行者は `docs/migration_from_hisui_2025_3_2.md` を読む。バイナリ名、環境変数 (`HISUI_*` から `SORA_ARCHIVE_COMPOSITOR_*` へ)、`tune` 履歴形式の変更が要点である。新規利用者は移行文書を無視してよい。
+- Hisui からの移行者は `docs/migration_from_hisui_2025_3_3.md` を読む。バイナリ名、環境変数 (`HISUI_*` から `SORA_ARCHIVE_COMPOSITOR_*` へ)、`tune` 履歴形式の変更が要点である。新規利用者は移行文書を無視してよい。
 
 ## 参照ドキュメント
 
@@ -251,7 +251,7 @@ Picture-in-Picture など複数リージョンの例は `docs/layout.md` にあ�
 - エンコード: `docs/layout_encode_params.md`
 - デコード: `docs/layout_decode_params.md`
 - ビルド: `docs/build.md`
-- Hisui 移行: `docs/migration_from_hisui_2025_3_2.md`
+- Hisui 移行: `docs/migration_from_hisui_2025_3_3.md`
 
 回答では推測でパラメーター名を作らず、該当ドキュメントと `list-codecs` 結果を根拠にする。
 実行環境にないコーデックやエンジンを提案しない。
