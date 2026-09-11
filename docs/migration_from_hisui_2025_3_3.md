@@ -1,20 +1,19 @@
-# Hisui からのマイグレーションガイド
+# Hisui 2025.3.3 からのマイグレーションガイド
 
-このドキュメントでは、以下のバージョン間の移行方法と相違点を説明します。
+Sora Archive Compositor は [Hisui](https://github.com/shiguredo/hisui) のバージョン 2025.3.3 から派生したツールです。
 
-- 移行元：Recording Composition Tool Hisui 2025.3.3
-- 移行先：Sora Archive Compositor 2026.1.0
+Sora Archive Compositor 2026.1.0 は、Hisui 2025.3.3 とほぼ互換のインターフェースを提供しているため、
+基本的には、コマンドのバイナリを置き換えるだけで、そのまま利用できます。
 
-Sora Archive Compositor 2026.1.0 の `compose` サブコマンドは、Hisui 2025.3.3 の `compose` サブコマンドとほぼ互換です。
-基本的には、バイナリ名と環境変数名を置き換えることで移行できます。
-このドキュメントでは、移行時に対応が必要な差分を説明します。
+ただし、バイナリ名の変更や、依存ライブラリの更新に伴う非互換な変更もいくつかあるため、
+このドキュメントでは、移行時に対応が必要となる可能性がある差分についてを説明します。
 
 ## 注意
 
-このガイドは、Hisui 2025.3.3 と Sora Archive Compositor 2026.1.0 の差分をもとに記載しています。
-Sora Archive Compositor 2026.1.0 より新しいバージョンの変更については [`CHANGES.md`](../CHANGES.md) を参照してください。
+このドキュメントは、Hisui 2025.3.3 と Sora Archive Compositor 2026.1.0 の差分をもとに記載しています。
+2026.1.0 以降の Sora Archive Compositor の変更については [`CHANGES.md`](../CHANGES.md) を参照してください。
 
-## `compose` サブコマンドへの移行方法
+## 録画合成コマンド（`compose`）の移行方法
 
 バイナリ名は `hisui` から `sora-archive-compositor` に変わりました。
 コマンドラインやスクリプトでは、バイナリ名を次のように置き換えてください。
@@ -27,58 +26,44 @@ $ hisui compose /path/to/archive/RECORDING_ID/
 $ sora-archive-compositor compose /path/to/archive/RECORDING_ID/
 ```
 
-`compose` サブコマンドで利用する環境変数は、接頭辞が `HISUI_*` から `SORA_ARCHIVE_COMPOSITOR_*` に変わりました。
-古い環境変数名は Sora Archive Compositor では利用できません。
+`compose` コマンドで利用する環境変数は、接頭辞が `HISUI_*` から `SORA_ARCHIVE_COMPOSITOR_*` に変わりました。
+以下の環境変数は、新しい名前に変更する必要があります。
 
-| Hisui | Sora Archive Compositor |
-|---|---|
-| `HISUI_LAYOUT_FILE_PATH` | `SORA_ARCHIVE_COMPOSITOR_LAYOUT_FILE_PATH` |
-| `HISUI_OPENH264_PATH` | `SORA_ARCHIVE_COMPOSITOR_OPENH264_PATH` |
-| `HISUI_THREAD_COUNT` | `SORA_ARCHIVE_COMPOSITOR_THREAD_COUNT` |
-
-FDK-AAC 用の `SORA_ARCHIVE_COMPOSITOR_FDK_AAC_PATH` については、[FDK-AAC の利用方法](#fdk-aac-の利用方法) を参照してください。
+- HISUI_LAYOUT_FILE_PATH (SORA_ARCHIVE_COMPOSITOR_LAYOUT_FILE_PATH に変更)
+- HISUI_OPENH264_PATH (SORA_ARCHIVE_COMPOSITOR_OPENH264_PATH に変更)
+- HISUI_THREAD_COUNT (SORA_ARCHIVE_COMPOSITOR_THREAD_COUNT に変更)
 
 ## FDK-AAC の利用方法
 
-FDK-AAC の共有ライブラリを読み込む方法が変わりました。
+### Ubuntu 向けビルド済みバイナリでの FDK-AAC の扱い
 
-| Hisui | Sora Archive Compositor |
-|---|---|
-| `fdk-aac` feature を有効にして自前でビルド | Ubuntu 向けビルド済みバイナリで `fdk-aac` feature を有効化 |
+Hisui では、Ubuntu 向けビルド済みバイナリで `fdk-aac` feature が無効になっていたため、
+FDK-AAC を利用する場合には、この feature を指定しての自前ビルドが必要でした。
 
-Sora Archive Compositor の Ubuntu 向けビルド済みバイナリでは、FDK-AAC を利用するために自前でビルドする必要はありません。
-ただし、FDK-AAC の共有ライブラリは同梱されないため、別途インストールしてください。
-`compose` で FDK-AAC の AAC エンコードを利用するには、共有ライブラリのパスを指定する必要があります。
+一方、Sora Archive Compositor の Ubuntu 向けビルド済みバイナリでは、`fdk-aac` feature が有効になっているため、自前ビルドは不要です。
 
-共有ライブラリのパスは、次のいずれかの方法で指定します。
+ただし、FDK-AAC ライブラリの利用方法自体には変更点があり、それは次に説明します。
+
+### FDK-AAC の共有ライブラリを読み込む方法の変更
+
+Hisui では `fdk-aac` feature を指定してビルドされたバイナリでは、システムの FDK-AAC 共有ライブラリが自動で読み込まれました。
+
+それに対して、Sora Archive Compositor では `compose` コマンドなどで、以下の方法で明示的に共有ライブラリのパスを指定する方式に変更されています。
 
 - `--fdk-aac` オプション
 - `SORA_ARCHIVE_COMPOSITOR_FDK_AAC_PATH` 環境変数
 
-```bash
-sora-archive-compositor compose \
-  --fdk-aac /path/to/libfdk-aac.so \
-  /path/to/archive/RECORDING_ID/
-```
+## H.265 の MP4 出力形式
 
-```bash
-SORA_ARCHIVE_COMPOSITOR_FDK_AAC_PATH=/path/to/libfdk-aac.so \
-  sora-archive-compositor compose /path/to/archive/RECORDING_ID/
-```
-
-Sora Archive Compositor の `fdk-aac` feature は Ubuntu 向けです。
-Hisui を macOS で `--features fdk-aac` によりビルドしていた場合は、デフォルト構成で自動的に有効になる Apple Audio Toolbox の AAC エンコードへ切り替えてください。
-自前でビルドする場合の手順については、[FDK-AAC を使った AAC エンコードを有効にする場合](build.md#fdk-aac-を使った-aac-エンコードを有効にする場合) を参照してください。
-
-## H.265 の MP4 出力
-
-H.265 の MP4 出力に使用するサンプルエントリーは、`hev1` から `hvc1` に変わりました。
-出力ファイルを処理するシステムがサンプルエントリーを判定している場合は、`hvc1` を受け入れるように変更してください。
+合成結果を H.265 でエンコードして MP4 に出力する場合に使用される MP4 ボックスの種別が、`hev1` から `hvc1` に変わりました。
+この二つのボックスは、仕様的にはほぼ同等なのですが、 Apple 系のプレイヤーでは `hvc1` しかサポートしていないことが多いため、その対応となります。
 
 ## ログ形式
 
-ログ 1 行の時刻表現は、プロセス起動後の経過秒から ISO 8601 UTC のマイクロ秒精度の絶対時刻に変わりました。
-モジュールパスの接頭辞も、`hisui` から `sora_archive_compositor` に変わりました。
+ログ出力のフォーマットには互換性はありません。
+
+具体的には、ログメッセージの時刻表記が「プロセス起動後の経過秒」から「ISO 8601 UTC のマイクロ秒精度の絶対時刻」に変わりました。
+また、メッセージに含まれる Rust のモジュールパスの接頭辞も、`hisui` から `sora_archive_compositor` に変わりました。
 
 ```text
 # Hisui
@@ -88,8 +73,8 @@ H.265 の MP4 出力に使用するサンプルエントリーは、`hev1` か�
 2026-07-30T12:34:56.123456Z [WARN] sora_archive_compositor::module - message
 ```
 
-標準エラー出力が端末の場合は、ログ行がログレベルに応じた ANSI 色で表示されます。
-環境変数 `NO_COLOR` を設定すると色付けを無効にできます。
+標準エラー出力が端末の場合は、ログ行がログレベルに応じた ANSI 色で表示されるようにもなりました。
+この機能は、環境変数 `NO_COLOR` を設定すると無効にできます。
 
 ```bash
 NO_COLOR=1 sora-archive-compositor compose /path/to/archive/RECORDING_ID/
@@ -97,23 +82,26 @@ NO_COLOR=1 sora-archive-compositor compose /path/to/archive/RECORDING_ID/
 
 ## エンコードパラメーターとデコードパラメーター
 
-デフォルトレイアウトを利用している場合は、移行に伴う対応は不要です。
+依存ライブラリの更新に伴い、エンコーダーおよびデコーダーで利用可能なパラメーターにも変更があります。
+
+Hisui で、デフォルトのパラメーターを用いてエンコードおよびデコードを行っていた場合には影響はないですが、
 レイアウト JSONC で `*_encode_params` または `*_decode_params` を個別に指定している場合は、以下の追加と廃止を確認してください。
 
 主な追加項目は以下のとおりです。
 
 - OpenH264 の `entropy_coding_mode`
-- SVT-AV1 のエンコードパラメーター 59 個
+- SVT-AV1 のエンコードパラメーター多数（59 個)
 - Video Toolbox の `data_rate_limits`
-- nvcodec デコーダーの `reconfigure_enabled`
+- NVCodec デコーダーの `reconfigure_enabled`
+
+SVT-AV1 の追加項目は数が多いため、このドキュメントでは個別に列挙していません。
+SVT-AV1 やそれ以外のパラメーターの詳細については、[エンコードパラメーター](layout_encode_params.md) と [デコードパラメーター](layout_decode_params.md) を参照してください。
 
 廃止された項目は以下のとおりです。
 
 - SVT-AV1 の `pred_structure`、`pin_threads`、`target_socket`、`enable_tpl_la`、`force_key_frames`、`recon_enabled`、`encoder_bit_depth`、`encoder_color_format`、`profile`、`level`、`tier`
-- Video Toolbox の `use_parallelization` と、H.264 での `allow_open_gop`
+  - また `encoder_color_format` は `color_format` に置き換わりました
+- Video Toolbox の `use_parallelization`
+- H.264 の `allow_open_gop`
 
-SVT-AV1 の `encoder_color_format` は `color_format` に置き換えてください。
-廃止されたエンコードパラメーターを指定すると、その指定は無視され、警告ログが出力されます。
-
-SVT-AV1 の追加項目は数が多いため、このガイドでは個別に列挙していません。
-追加項目を含む個々のパラメーターについては、[エンコードパラメーター](layout_encode_params.md) と [デコードパラメーター](layout_decode_params.md) を参照してください。
+廃止されたパラメーターを指定すると、その指定は無視され、警告ログが出力されます。
