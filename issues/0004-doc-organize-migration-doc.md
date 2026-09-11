@@ -1,7 +1,7 @@
 # migration_from_hisui_2025_3_3.md の内容を整理・修正する
 
 - Created: 2026-08-03
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-11
 - Branch: feature/update-migration-doc
 - Polished: {YYYY-MM-DD}
 - Updated: 2026-09-09
@@ -69,3 +69,13 @@ Hisui 2025.3.3 は H.265 MP4 入力の `hvc1` サンプルエントリーに対�
 - エンコードパラメーターの追加、廃止、リネーム、型変化、`intra_period_length: -1` の非互換が本文に書かれている
 - 探索空間についての記述が、直した後の `search-space-examples/full.jsonc` と矛盾していない
 - ビルド済みバイナリ、Docker イメージ、crates.io の案内がリリース時点の提供状況および関連ドキュメントと一致している
+
+## 解決方法
+
+移行ドキュメントを `docs/migration_from_hisui_2025_3_3.md` にリネームし、リポジトリ内の参照を更新した。
+内容は `compose` コマンドの移行を中心に再構成し、バイナリ名と環境変数の変更、FDK-AAC の利用方法、H.265 の MP4 出力形式、ログ形式、エンコードおよびデコードパラメーターの主な差分を記載した。
+
+詳細なパラメーター一覧は既存のパラメータードキュメントへ委ね、通常の移行に不要な開発用コマンド、隠し設定、ビルド設定、配布物の説明は対象外とした。
+Video Toolbox の `allow_frame_reordering` は Hisui と同様に指定値を無視して常に無効とし、移行差分として扱わないように実装とドキュメントを揃えた。
+
+Hisui 2025.3.3 と現在の実装を照合し、移行時に利用者が確認すべき機能差分に内容を整理できたため closed にする。
