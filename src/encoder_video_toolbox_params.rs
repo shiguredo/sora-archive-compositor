@@ -68,6 +68,8 @@ fn update_h264_encode_params(
     // [NOTE] 2026.1.0 で以下のフィールドは非対応になったため、指定されても無視する:
     // - use_parallelization (Video Toolbox 側で撤廃された)
     // - allow_open_gop (H.264 側では効かないため HevcEncoderConfig のみに残った)
+    // - allow_frame_reordering (MP4 出力がフレームの並べ替えに対応していないため常に false)
+    let _ = params.get_with("allow_frame_reordering", |_| Ok(()))?;
 
     // 2026.1.0 で prioritize_speed_over_quality -> prioritize_encoding_speed_over_quality にリネーム
     if let Some(v) = params.get::<bool>("prioritize_speed_over_quality")? {
@@ -84,11 +86,6 @@ fn update_h264_encode_params(
 
     if let Some(v) = params.get::<bool>("allow_temporal_compression")? {
         config.allow_temporal_compression = v;
-    }
-
-    // フレーム再順序付けを許可 (false で B フレーム無効化)
-    if let Some(v) = params.get::<bool>("allow_frame_reordering")? {
-        config.allow_frame_reordering = v;
     }
 
     // キーフレーム間隔設定（フレーム数）
@@ -156,7 +153,10 @@ fn update_h265_encode_params(
     // - fps_denominator
     // - average_bitrate
 
-    // [NOTE] 2026.1.0 で use_parallelization は Video Toolbox 側で撤廃された
+    // [NOTE] 以下のフィールドは非対応になったため、指定されても無視する:
+    // - use_parallelization (Video Toolbox 側で撤廃された)
+    // - allow_frame_reordering (MP4 出力がフレームの並べ替えに対応していないため常に false)
+    let _ = params.get_with("allow_frame_reordering", |_| Ok(()))?;
 
     // H.265 ではこれが false だとエラーになるため、常に true を指定する
     config.prioritize_encoding_speed_over_quality = true;
@@ -171,11 +171,6 @@ fn update_h265_encode_params(
 
     if let Some(v) = params.get::<bool>("allow_temporal_compression")? {
         config.allow_temporal_compression = v;
-    }
-
-    // フレーム再順序付けを許可 (false で B フレーム無効化)
-    if let Some(v) = params.get::<bool>("allow_frame_reordering")? {
-        config.allow_frame_reordering = v;
     }
 
     // キーフレーム間隔設定（フレーム数）

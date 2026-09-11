@@ -105,7 +105,6 @@
     "under_shoot_pct": 75,
   },
   "video_toolbox_h264_encode_params": {
-    "allow_frame_reordering": false,
     "allow_temporal_compression": true,
     "h264_entropy_mode": "cavlc",
     "max_frame_delay_count": 2,
@@ -116,7 +115,6 @@
     "real_time": false,
   },
   "video_toolbox_h265_encode_params": {
-    "allow_frame_reordering": false,
     "allow_open_gop": true,
     "allow_temporal_compression": true,
     "max_frame_delay_count": 15,

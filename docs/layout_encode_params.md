@@ -780,9 +780,6 @@ Sora Archive Compositor は映像のエンコーダーとして、以下をサ�
 
 ### フレーム構造設定
 
-- `allow_frame_reordering` (真偽値): フレーム再順序付けの許可
-  - デフォルト値: `false`
-
 - `allow_temporal_compression` (真偽値): 時間圧縮の許可
   - デフォルト値: `true`
 
@@ -841,9 +838,6 @@ H.265 エンコーダーは H.264 と多くの共通点がありますが、い�
   - デフォルト値: `false`
 
 ### フレーム構造設定
-
-- `allow_frame_reordering` (真偽値): フレーム再順序付けの許可
-  - デフォルト値: `false`
 
 - `allow_temporal_compression` (真偽値): 時間圧縮の許可
   - デフォルト値: `true`
