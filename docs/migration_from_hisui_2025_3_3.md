@@ -1,6 +1,6 @@
 # Hisui 2025.3.3 からのマイグレーションガイド
 
-Sora Archive Compositor は [Hisui](https://github.com/shiguredo/hisui) のバージョン 2025.3.3 から派生したツールです。
+Sora Archive Compositor は [Hisui のバージョン 2025.3.3](https://github.com/shiguredo/hisui/releases/tag/2025.3.3) から派生したツールです。
 
 Sora Archive Compositor 2026.1.0 は、Hisui 2025.3.3 とほぼ互換のインターフェースを提供しているため、
 基本的には、コマンドのバイナリを置き換えるだけで、そのまま利用できます。
