@@ -11,7 +11,7 @@ Sora Archive Compositor 2026.1.0 は、Hisui 2025.3.3 とほぼ互換のイン�
 ## 注意
 
 このドキュメントは、Hisui 2025.3.3 と Sora Archive Compositor 2026.1.0 の差分をもとに記載しています。
-2026.1.0 以降の Sora Archive Compositor の変更については [`CHANGES.md`](../CHANGES.md) を参照してください。
+Sora Archive Compositor 2026.1.0 より新しいバージョンの変更については [`CHANGES.md`](../CHANGES.md) を参照してください。
 
 ## 録画合成コマンド（`compose`）の移行方法
 
@@ -37,26 +37,25 @@ $ sora-archive-compositor compose /path/to/archive/RECORDING_ID/
 
 ### Ubuntu 向けビルド済みバイナリでの FDK-AAC の扱い
 
-Hisui では、Ubuntu 向けビルド済みバイナリで `fdk-aac` feature が無効になっていたため、
-FDK-AAC を利用する場合には、この feature を指定しての自前ビルドが必要でした。
+Hisui の Ubuntu 向けビルド済みバイナリでは、`fdk-aac` feature が無効になっていました。
+そのため、FDK-AAC を利用するには、`fdk-aac` feature を有効にして自前でビルドする必要がありました。
 
 一方、Sora Archive Compositor の Ubuntu 向けビルド済みバイナリでは、`fdk-aac` feature が有効になっているため、自前ビルドは不要です。
-
-ただし、FDK-AAC ライブラリの利用方法自体には変更点があり、それは次に説明します。
+ただし、FDK-AAC の共有ライブラリ自体は同梱されていないため、別途インストールしてください。
 
 ### FDK-AAC の共有ライブラリを読み込む方法の変更
 
-Hisui では `fdk-aac` feature を指定してビルドされたバイナリでは、システムの FDK-AAC 共有ライブラリが自動で読み込まれました。
+Hisui では、`fdk-aac` feature を指定してビルドすると、システムの FDK-AAC 共有ライブラリが自動で読み込まれました。
 
-それに対して、Sora Archive Compositor では `compose` コマンドなどで、以下の方法で明示的に共有ライブラリのパスを指定する方式に変更されています。
+Sora Archive Compositor では、次のいずれかの方法で共有ライブラリのパスを明示的に指定してください。
 
 - `--fdk-aac` オプション
 - `SORA_ARCHIVE_COMPOSITOR_FDK_AAC_PATH` 環境変数
 
 ## H.265 の MP4 出力形式
 
-合成結果を H.265 でエンコードして MP4 に出力する場合に使用される MP4 ボックスの種別が、`hev1` から `hvc1` に変わりました。
-この二つのボックスは、仕様的にはほぼ同等なのですが、 Apple 系のプレイヤーでは `hvc1` しかサポートしていないことが多いため、その対応となります。
+合成結果を H.265 でエンコードして MP4 に出力する場合に、MP4 内で H.265 映像を表す形式が `hev1` から `hvc1` に変わりました。
+H.265 映像はどちらの形式でも表現できますが、Apple 系のプレイヤーでは `hvc1` しかサポートしていないことが多いため、互換性を高めるための変更です。
 
 ## ログ形式
 
@@ -84,15 +83,15 @@ NO_COLOR=1 sora-archive-compositor compose /path/to/archive/RECORDING_ID/
 
 依存ライブラリの更新に伴い、エンコーダーおよびデコーダーで利用可能なパラメーターにも変更があります。
 
-Hisui で、デフォルトのパラメーターを用いてエンコードおよびデコードを行っていた場合には影響はないですが、
+Hisui でデフォルトのパラメーターを用いていた場合、移行のための設定変更は不要です。
 レイアウト JSONC で `*_encode_params` または `*_decode_params` を個別に指定している場合は、以下の追加と廃止を確認してください。
 
 主な追加項目は以下のとおりです。
 
 - OpenH264 の `entropy_coding_mode`
-- SVT-AV1 のエンコードパラメーター多数（59 個)
+- SVT-AV1 のエンコードパラメーター多数 (59 個)
 - Video Toolbox の `data_rate_limits`
-- NVCodec デコーダーの `reconfigure_enabled`
+- nvcodec デコーダーの `reconfigure_enabled`
 
 SVT-AV1 の追加項目は数が多いため、このドキュメントでは個別に列挙していません。
 SVT-AV1 やそれ以外のパラメーターの詳細については、[エンコードパラメーター](layout_encode_params.md) と [デコードパラメーター](layout_decode_params.md) を参照してください。
@@ -100,8 +99,9 @@ SVT-AV1 やそれ以外のパラメーターの詳細については、[エン�
 廃止された項目は以下のとおりです。
 
 - SVT-AV1 の `pred_structure`、`pin_threads`、`target_socket`、`enable_tpl_la`、`force_key_frames`、`recon_enabled`、`encoder_bit_depth`、`encoder_color_format`、`profile`、`level`、`tier`
-  - また `encoder_color_format` は `color_format` に置き換わりました
-- Video Toolbox の `use_parallelization`
-- H.264 の `allow_open_gop`
+- Video Toolbox の `use_parallelization` と H.264 用の `allow_open_gop`
+
+SVT-AV1 の `encoder_color_format` を指定していた場合は、`color_format` に置き換え、値を `"i420"` または `"i42010"` に変更してください。
+また、`intra_period_length` に `-1` は指定できないため、1 以上の値に変更してください。
 
 廃止されたパラメーターを指定すると、その指定は無視され、警告ログが出力されます。
